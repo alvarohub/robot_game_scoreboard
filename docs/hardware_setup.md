@@ -77,16 +77,25 @@ Adjust in `platformio.ini` if your wiring differs.
 
 ## Power budget
 
-| Scenario                                          | Current draw (approx.)     |
-| ------------------------------------------------- | -------------------------- |
-| All LEDs off                                      | ~0.3 A (ESP32 + quiescent) |
-| Typical score display (white text, brightness 20) | ~1–2 A                     |
+Each WS2812B LED can draw up to ~60 mA at full white / full brightness,
+but for a text scoreboard **10 mA per LED is a realistic design budget**
+(low brightness, limited pixels lit). That gives:
+
+$$1\,536 \times 10\,\text{mA} = 15.4\,\text{A (absolute worst case at 10 mA budget)}$$
+
+In practice, only ~10–15 % of pixels are lit when showing text, so
+actual draw is far below that.
+
+| Scenario                                          | Current draw (approx.)                              |
+| ------------------------------------------------- | --------------------------------------------------- |
+| All LEDs off                                      | ~0.3 A (ESP32 + quiescent)                          |
+| Typical score display (white text, brightness 20) | ~1–2 A                                              |
+| Busy display, brightness 100                      | ~5–8 A                                              |
 | All LEDs full white, brightness 255               | ~92 A (theoretical max — never happens in practice) |
 
-> **Rule of thumb:** only ~10–15 % of pixels are lit when showing
-> text, so at brightness 20 expect **~1–2 A** real draw.
-> Even cranking brightness to 100 with colourful text stays
-> well under 10 A. A 10 A supply is plenty for normal use.
+> **Recommendation:** a **5 V / 5–10 A** supply is more than enough
+> for normal scoreboard use. Even a 5 A supply will work fine at
+> default brightness.
 
 ---
 

@@ -19,17 +19,17 @@ Six-display NeoPixel scoreboard driven by **OSC over UDP** or
 
 ## Hardware
 
-| Part                                                | Role            | Notes                                                             |
-| --------------------------------------------------- | --------------- | ----------------------------------------------------------------- |
-| M5Stack **AtomS3** (ESP32-S3)                       | Microcontroller | Any ESP32 board works                                             |
-| 6 × WS2812B 32×8 NeoPixel matrix                    | Score displays  | Daisy-chained via single data line                                |
-| M5Stack **ESP32 Ethernet Unit with PoE** (optional) | Wired network   | W5500 SPI chip, for production use                                |
-| 5 V PSU (≥ 10 A recommended)                        | LED power       | Typical text display draws ~1–2 A; a 10 A supply gives plenty of headroom |
+| Part                                                | Role            | Notes                                                |
+| --------------------------------------------------- | --------------- | ---------------------------------------------------- |
+| M5Stack **AtomS3** (ESP32-S3)                       | Microcontroller | Any ESP32 board works                                |
+| 6 × WS2812B 32×8 NeoPixel matrix                    | Score displays  | Daisy-chained via single data line                   |
+| M5Stack **ESP32 Ethernet Unit with PoE** (optional) | Wired network   | W5500 SPI chip, for production use                   |
+| 5 V PSU (≥ 5 A recommended)                         | LED power       | Budget ~10 mA/LED; typical text display draws ~1–2 A |
 
-> **Power note:** 1 536 LEDs could theoretically draw ~92 A
-> (all white, full brightness), but that never happens with
-> text display at brightness 20. Still, always use an external
-> 5 V supply — never power the matrices from USB alone.
+> **Power note:** at 10 mA per LED the theoretical max is ~15 A,
+> but text display at brightness 20 only draws ~1–2 A.
+> A 5–10 A supply is plenty. Always use an external 5 V supply —
+> never power the matrices from USB alone.
 
 See [`docs/hardware_setup.md`](docs/hardware_setup.md) for wiring details.
 
