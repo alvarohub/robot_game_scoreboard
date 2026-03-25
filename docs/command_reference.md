@@ -195,8 +195,9 @@ client.send_message("/display/2", "999")        # will scroll in
 | --------- | ----- | -------------------- |
 | arg 0     | `int` | Brightness (0 – 255) |
 
-Default is **20**. Higher values significantly increase current draw
-(6 panels × 256 LEDs = up to ~90 A at max brightness, full white).
+Default is **20**. At this level, typical text display draws ~1–2 A.
+Higher values increase current draw proportionally (a 10 A PSU
+covers any realistic use case).
 
 **OSC (Python):**
 

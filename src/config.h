@@ -29,7 +29,7 @@
 #define TOTAL_HEIGHT MATRIX_TILE_HEIGHT                  // 8
 
 // Brightness 0-255.  Keep LOW during development to limit current draw!
-// 6 panels × 256 LEDs = 1536 LEDs → up to ~90 A at full white/full bright.
+// 6 panels × 256 LEDs = 1536 LEDs.  Text at brightness 20 → ~1–2 A.
 #define DEFAULT_BRIGHTNESS 20
 
 // ── NeoMatrix layout flags ───────────────────────────────────

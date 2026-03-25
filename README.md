@@ -24,11 +24,12 @@ Six-display NeoPixel scoreboard driven by **OSC over UDP** or
 | M5Stack **AtomS3** (ESP32-S3)                       | Microcontroller | Any ESP32 board works                                             |
 | 6 × WS2812B 32×8 NeoPixel matrix                    | Score displays  | Daisy-chained via single data line                                |
 | M5Stack **ESP32 Ethernet Unit with PoE** (optional) | Wired network   | W5500 SPI chip, for production use                                |
-| 5 V PSU (≥ 15 A recommended)                        | LED power       | 1 536 LEDs × ~60 mA max = 92 A absolute max; real use is far less |
+| 5 V PSU (≥ 10 A recommended)                        | LED power       | Typical text display draws ~1–2 A; a 10 A supply gives plenty of headroom |
 
-> **Power warning:** Never power 1 536 LEDs from USB alone.
-> Use an external 5 V supply connected directly to the matrix
-> power rails with adequate wiring gauge.
+> **Power note:** 1 536 LEDs could theoretically draw ~92 A
+> (all white, full brightness), but that never happens with
+> text display at brightness 20. Still, always use an external
+> 5 V supply — never power the matrices from USB alone.
 
 See [`docs/hardware_setup.md`](docs/hardware_setup.md) for wiring details.
 

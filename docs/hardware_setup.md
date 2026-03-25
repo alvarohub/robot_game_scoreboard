@@ -81,11 +81,12 @@ Adjust in `platformio.ini` if your wiring differs.
 | ------------------------------------------------- | -------------------------- |
 | All LEDs off                                      | ~0.3 A (ESP32 + quiescent) |
 | Typical score display (white text, brightness 20) | ~1–2 A                     |
-| All LEDs full white, brightness 255               | ~92 A (**do not do this**) |
+| All LEDs full white, brightness 255               | ~92 A (theoretical max — never happens in practice) |
 
-> Rule of thumb: at brightness 20 (the default), peak draw is
-> roughly **brightness/255 × 92 A ≈ 7 A**. A 10–15 A supply
-> provides comfortable headroom.
+> **Rule of thumb:** only ~10–15 % of pixels are lit when showing
+> text, so at brightness 20 expect **~1–2 A** real draw.
+> Even cranking brightness to 100 with colourful text stays
+> well under 10 A. A 10 A supply is plenty for normal use.
 
 ---
 
