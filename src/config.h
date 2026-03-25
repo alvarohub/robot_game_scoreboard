@@ -55,6 +55,13 @@
 
 #define LED_TYPE (NEO_GRB + NEO_KHZ800)
 
+// ── Serial command interface ─────────────────────────────────
+// Enable text-based commands over USB-Serial (same syntax as OSC addresses).
+// Disable with -DSERIAL_CMD_ENABLED=0 in build_flags if not needed.
+#ifndef SERIAL_CMD_ENABLED
+  #define SERIAL_CMD_ENABLED 1
+#endif
+
 // ── Ethernet W5500 pins (M5Stack Ethernet Unit) ─────────────
 #ifdef USE_ETHERNET_W5500
   #ifndef ETH_CS_PIN

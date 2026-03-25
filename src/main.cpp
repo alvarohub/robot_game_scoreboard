@@ -103,5 +103,8 @@ void loop() {
     M5.update();         // poll button, IMU, etc.
 #endif
     osc.update();        // read & dispatch incoming OSC packets
+#if SERIAL_CMD_ENABLED
+    osc.processSerial(); // read & dispatch serial text commands
+#endif
     display.update();    // push pixel changes to the strip (no-op when idle)
 }

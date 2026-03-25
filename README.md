@@ -1,7 +1,7 @@
 # Robot Game Scoreboard
 
-Six-display NeoPixel scoreboard driven by **OSC over UDP**, built on
-ESP32 with PlatformIO / Arduino.
+Six-display NeoPixel scoreboard driven by **OSC over UDP** or
+**serial text commands**, built on ESP32 with PlatformIO / Arduino.
 
 ```
 ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
@@ -11,6 +11,7 @@ ESP32 with PlatformIO / Arduino.
       ↑ NeoPixel data (single GPIO)
   ┌────────┐
   │  ESP32 │◄── OSC / UDP (WiFi or Ethernet PoE)
+  │        │◄── Serial text commands (USB)
   └────────┘
 ```
 
@@ -100,7 +101,13 @@ Displays are numbered **1 – 6** in OSC messages.
 | `/brightness`             | `int` (0-255)                    | `/brightness` `40`           | Set global brightness |
 | `/clearall` or `/clear`   | —                                | `/clearall`                  | Clear all displays    |
 
-Full protocol reference: [`docs/osc_protocol.md`](docs/osc_protocol.md)
+All commands also work over **USB-Serial** as plain text lines (same syntax,
+newline-terminated). No network required — great for testing and standalone use.
+
+Full command reference (all interfaces, examples, C++ API):
+[`docs/command_reference.md`](docs/command_reference.md)
+
+OSC-specific protocol details: [`docs/osc_protocol.md`](docs/osc_protocol.md)
 
 ---
 

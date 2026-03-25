@@ -180,3 +180,123 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         Serial.printf("Unknown OSC: %s\n", address);
     }
 }
+
+// ══════════════════════════════════════════════════════════════
+//  Serial command interface
+// ══════════════════════════════════════════════════════════════
+//
+//  Accepts newline-terminated text commands over USB-Serial that
+//  mirror the OSC address scheme.  Each line is parsed into an
+//  address and arguments, packaged as a proxy OSCMessage, and
+//  routed through _processMessage() — zero duplicated logic.
+//
+//  Format:   /address [arg1] [arg2] …
+//
+//    - First token must start with '/'
+//    - Tokens in quotes are string arguments:  "hello world"
+//    - Otherwise parsed as integer
+//
+//  Examples:
+//    /display/1/text "HELLO"
+//    /display/2 42
+//    /display/1/color 255 0 0
+//    /brightness 128
+//    /clearall
+//
+// ══════════════════════════════════════════════════════════════
+
+#if SERIAL_CMD_ENABLED
+
+void OSCHandler::processSerial() {
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (_serialPos > 0) {
+                _serialBuf[_serialPos] = '\0';
+                _handleSerialLine(_serialBuf);
+                _serialPos = 0;
+            }
+        } else if (_serialPos < SERIAL_BUF_SIZE - 1) {
+            _serialBuf[_serialPos++] = c;
+        }
+        // else: overflow — silently drop until newline
+    }
+}
+
+void OSCHandler::_handleSerialLine(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+
+    // Ignore empty lines and comments
+    if (*line == '\0' || *line == '#') return;
+
+    if (*line != '/') {
+        Serial.println("Serial cmd must start with '/'");
+        return;
+    }
+
+    // Extract address (first token)
+    char address[64];
+    const char* p = line;
+    size_t i = 0;
+    while (*p && *p != ' ' && *p != '\t' && i < sizeof(address) - 1) {
+        address[i++] = *p++;
+    }
+    address[i] = '\0';
+
+    // Build a proxy OSCMessage with the parsed address
+    OSCMessage msg(address);
+
+    // Parse remaining tokens as arguments
+    while (*p) {
+        // Skip whitespace
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0') break;
+
+        if (*p == '"') {
+            // Quoted string argument
+            p++;  // skip opening quote
+            char strArg[64];
+            size_t si = 0;
+            while (*p && *p != '"' && si < sizeof(strArg) - 1) {
+                strArg[si++] = *p++;
+            }
+            strArg[si] = '\0';
+            if (*p == '"') p++;  // skip closing quote
+            msg.add(strArg);
+        } else {
+            // Try integer
+            char* end = nullptr;
+            long val = strtol(p, &end, 10);
+            if (end != p) {
+                msg.add((int32_t)val);
+                p = end;
+            } else {
+                // Unquoted string token (until next space)
+                char tok[64];
+                size_t ti = 0;
+                while (*p && *p != ' ' && *p != '\t' && ti < sizeof(tok) - 1) {
+                    tok[ti++] = *p++;
+                }
+                tok[ti] = '\0';
+                msg.add(tok);
+            }
+        }
+    }
+
+    Serial.printf("Serial → %s", address);
+    for (int a = 0; a < msg.size(); a++) {
+        if (msg.isString(a)) {
+            char tmp[64];
+            msg.getString(a, tmp, sizeof(tmp));
+            Serial.printf(" \"%s\"", tmp);
+        } else if (msg.isInt(a)) {
+            Serial.printf(" %ld", (long)msg.getInt(a));
+        }
+    }
+    Serial.println();
+
+    _processMessage(msg);
+}
+
+#endif
