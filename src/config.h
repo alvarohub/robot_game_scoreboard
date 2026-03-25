@@ -22,11 +22,11 @@
   #define NEOPIXEL_PIN 2           // GPIO for NeoPixel data line
 #endif
 
-#define NUM_DISPLAYS        6      // logical score displays
-#define MATRIX_TILE_WIDTH  32      // pixels per tile (width)
+#define NUM_DISPLAYS        1      // logical score displays
+#define MATRIX_TILE_WIDTH   8      // pixels per tile (width)
 #define MATRIX_TILE_HEIGHT  8      // pixels per tile (height)
-#define TOTAL_WIDTH  (NUM_DISPLAYS * MATRIX_TILE_WIDTH)  // 192
-#define TOTAL_HEIGHT MATRIX_TILE_HEIGHT                  // 8
+#define TOTAL_WIDTH  (NUM_DISPLAYS * MATRIX_TILE_WIDTH)
+#define TOTAL_HEIGHT MATRIX_TILE_HEIGHT
 
 // Brightness 0-255.  Keep LOW during development to limit current draw!
 // 6 panels × 256 LEDs = 1536 LEDs.  Text at brightness 20 → ~1–2 A.
@@ -60,6 +60,13 @@
 // Disable with -DSERIAL_CMD_ENABLED=0 in build_flags if not needed.
 #ifndef SERIAL_CMD_ENABLED
   #define SERIAL_CMD_ENABLED 1
+#endif
+
+// ── WiFi prompt ──────────────────────────────────────────────
+// Seconds to wait for button press before skipping WiFi.
+// Set to 0 to always connect without asking.
+#ifndef WIFI_PROMPT_SECONDS
+  #define WIFI_PROMPT_SECONDS 10
 #endif
 
 // ── Ethernet W5500 pins (M5Stack Ethernet Unit) ─────────────

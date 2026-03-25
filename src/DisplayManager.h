@@ -48,6 +48,9 @@ public:
     /// Runs a short self-test that lights each display in sequence.
     void showTestPattern();
 
+    /// Splash screen shown once at startup (e.g. "GAME" on all panels).
+    void startDisplay(unsigned long durationMs = 2000);
+
     /// Returns true if any display is currently mid-scroll.
     bool isAnimating() const;
 
@@ -66,7 +69,8 @@ private:
     DisplayState _displays[NUM_DISPLAYS];
     bool _needsUpdate;
 
-    void    _drawDisplay(uint8_t index);
-    void    _drawDisplayScrollFrame(uint8_t index);
-    int16_t _centerTextX(uint8_t index, const char* text);
+    void        _drawDisplay(uint8_t index);
+    void        _drawDisplayScrollFrame(uint8_t index);
+    const char* _fitTextRight(const char* text);
+    int16_t     _centerTextX(uint8_t index, const char* text);
 };

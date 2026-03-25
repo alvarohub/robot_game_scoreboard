@@ -174,7 +174,6 @@ void DisplayManager::showTestPattern() {
         char label[8];
         snprintf(label, sizeof(label), "D%d", i + 1);
         _displays[i].color = colors[i % 6];
-        // Force instant for the test pattern
         uint8_t savedMode = _displays[i].scrollMode;
         _displays[i].scrollMode = SCROLL_NONE;
         setText(i, label);
@@ -188,9 +187,43 @@ void DisplayManager::showTestPattern() {
     update();
 }
 
+// ── Splash screen ────────────────────────────────────────────
+void DisplayManager::startDisplay(unsigned long durationMs) {
+    uint16_t cyan = _matrix.Color(0, 255, 255);
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        _displays[i].color = cyan;
+        uint8_t savedMode = _displays[i].scrollMode;
+        _displays[i].scrollMode = SCROLL_NONE;
+        setText(i, "GAME");
+        _displays[i].scrollMode = savedMode;
+    }
+    update();
+    delay(durationMs);
+    clearAll();
+    update();
+}
+
 // ══════════════════════════════════════════════════════════════
 //  Private helpers
 // ══════════════════════════════════════════════════════════════
+
+// Return a pointer into `text` at the rightmost substring that fits
+// within MATRIX_TILE_WIDTH.  E.g. "1234" on an 8-px tile → "4".
+const char* DisplayManager::_fitTextRight(const char* text) {
+    int16_t  x1, y1;
+    uint16_t w, h;
+    _matrix.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    if ((int16_t)w <= MATRIX_TILE_WIDTH) return text;
+
+    // Walk forward, dropping leading chars, until it fits
+    const char* p = text;
+    while (*p) {
+        p++;
+        _matrix.getTextBounds(p, 0, 0, &x1, &y1, &w, &h);
+        if ((int16_t)w <= MATRIX_TILE_WIDTH) return p;
+    }
+    return p;   // empty string — nothing fits
+}
 
 void DisplayManager::_drawDisplay(uint8_t idx) {
     int16_t x0 = idx * MATRIX_TILE_WIDTH;
@@ -198,10 +231,13 @@ void DisplayManager::_drawDisplay(uint8_t idx) {
 
     if (_displays[idx].text[0] == '\0') return;
 
+    const char* visible = _fitTextRight(_displays[idx].text);
+    if (*visible == '\0') return;
+
     _matrix.setTextColor(_displays[idx].color);
-    int16_t x = _centerTextX(idx, _displays[idx].text);
+    int16_t x = _centerTextX(idx, visible);
     _matrix.setCursor(x, 0);
-    _matrix.print(_displays[idx].text);
+    _matrix.print(visible);
 }
 
 void DisplayManager::_drawDisplayScrollFrame(uint8_t idx) {
@@ -227,16 +263,22 @@ void DisplayManager::_drawDisplayScrollFrame(uint8_t idx) {
 
     // Draw old text at its scrolled position
     if (_displays[idx].oldText[0] != '\0') {
-        int16_t xOld = _centerTextX(idx, _displays[idx].oldText);
-        _matrix.setCursor(xOld, oldY);
-        _matrix.print(_displays[idx].oldText);
+        const char* visOld = _fitTextRight(_displays[idx].oldText);
+        if (*visOld) {
+            int16_t xOld = _centerTextX(idx, visOld);
+            _matrix.setCursor(xOld, oldY);
+            _matrix.print(visOld);
+        }
     }
 
     // Draw new text at its scrolled position
     if (_displays[idx].text[0] != '\0') {
-        int16_t xNew = _centerTextX(idx, _displays[idx].text);
-        _matrix.setCursor(xNew, newY);
-        _matrix.print(_displays[idx].text);
+        const char* visNew = _fitTextRight(_displays[idx].text);
+        if (*visNew) {
+            int16_t xNew = _centerTextX(idx, visNew);
+            _matrix.setCursor(xNew, newY);
+            _matrix.print(visNew);
+        }
     }
 }
 
