@@ -85,6 +85,71 @@ Turns off all LEDs on all six displays.
 
 ---
 
+### Set scroll mode
+
+```
+/display/<N>/scroll  <int mode>
+/scroll              <int mode>       (all displays)
+```
+
+| Mode | Constant      | Behaviour                               |
+| ---- | ------------- | --------------------------------------- |
+| `0`  | `SCROLL_NONE` | Instant replacement (default)           |
+| `1`  | `SCROLL_UP`   | Old text scrolls up, new enters below   |
+| `2`  | `SCROLL_DOWN` | Old text scrolls down, new enters above |
+
+Switching to mode `0` automatically flushes the scroll queue and shows
+the last queued value instantly.
+
+---
+
+### Set scroll speed
+
+```
+/scrollspeed  <int ms>
+```
+
+Milliseconds per pixel step of the scroll animation (default `25`).
+With 8-pixel-high tiles: `25 ms × 8 = 200 ms` per transition.
+Minimum 1.
+
+---
+
+### Set scroll blank
+
+```
+/scrollblank  <int 0|1>
+```
+
+When `1`, a blank (all-dark) frame is shown between consecutive queued
+scroll items. Prevents visual “bleeding” at high scroll speeds.
+Default `0` (off).
+
+---
+
+### Manage scroll queue
+
+```
+/display/<N>/clearqueue          (one display)
+/clearqueue                      (all displays)
+```
+
+Discards pending queued text without affecting the current display.
+
+---
+
+### Query animation state
+
+```
+/status
+```
+
+Replies on serial with `ANIMATING 0` or `ANIMATING 1`.
+Firmware also emits `SCROLL_DONE <N>` (1-based) when each display
+finishes a scroll animation.
+
+---
+
 ## Sending from common tools
 
 ### Python (`python-osc`)

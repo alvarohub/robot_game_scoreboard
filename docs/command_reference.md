@@ -241,6 +241,81 @@ client.send_message("/scroll", 1)    # all displays scroll up
 
 ---
 
+### `/scrollspeed` — set scroll animation speed
+
+| Parameter | Type  | Description                                |
+| --------- | ----- | ------------------------------------------ |
+| arg 0     | `int` | Milliseconds per pixel step (default `25`) |
+
+Controls how fast scroll-transitions run. With the default 8-pixel-high
+tiles, `25 ms × 8 = 200 ms` per transition. Lower values = faster.
+Minimum 1.
+
+**Serial:**
+
+```
+/scrollspeed 10      # fast scrolling
+/scrollspeed 50      # slow, easy-to-read scrolling
+```
+
+---
+
+### `/scrollblank` — blank frame between scroll items
+
+| Parameter | Type  | Description                   |
+| --------- | ----- | ----------------------------- |
+| arg 0     | `int` | `0` = off (default), `1` = on |
+
+When enabled, a blank (all-dark) frame is briefly shown between
+consecutive queued scroll items. This prevents visual “bleeding” /
+ghosting that can occur at high scroll speeds.
+
+**Serial:**
+
+```
+/scrollblank 1       # enable blank frame
+/scrollblank 0       # disable (default)
+```
+
+---
+
+### `/display/<N>/clearqueue` — clear scroll queue for one display
+
+No arguments. Discards all pending queued text for display _N_
+without affecting the currently shown value or in-progress animation.
+
+**Serial:**
+
+```
+/display/1/clearqueue
+```
+
+---
+
+### `/clearqueue` — clear all scroll queues
+
+No arguments. Discards pending queued text on all displays.
+
+**Serial:**
+
+```
+/clearqueue
+```
+
+---
+
+### `/status` — query animation state
+
+No arguments. Replies on serial with `ANIMATING 0` or `ANIMATING 1`.
+
+**Serial:**
+
+```
+/status
+```
+
+---
+
 ### `/clearall` or `/clear` — clear all displays
 
 No arguments. Turns off all LEDs on all six displays.
@@ -358,7 +433,7 @@ Declared in `src/OSCHandler.h`, implemented in `src/OSCHandler.cpp`.
 Declared in `src/DisplayManager.h`, implemented in `src/DisplayManager.cpp`.
 
 | Method                                                        | Description                                                                    |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------ | --- | ---------------------------------------- | ----------------------------------------------------------------- |
 | `DisplayManager()`                                            | Constructor — sets up the NeoMatrix with layout from `config.h`.               |
 | `void begin()`                                                | Initialises the NeoPixel hardware.                                             |
 | `void setText(uint8_t idx, const char* text)`                 | Set text on display `idx` (0-based). Triggers scroll if scroll mode is active. |
@@ -366,8 +441,10 @@ Declared in `src/DisplayManager.h`, implemented in `src/DisplayManager.cpp`.
 | `void setColor(uint8_t idx, uint16_t color565)`               | Set colour using a 16-bit 565 value.                                           |
 | `void clear(uint8_t idx)`                                     | Clear one display.                                                             |
 | `void setScrollMode(uint8_t idx, uint8_t mode)`               | Set scroll transition mode for display `idx` (0/1/2).                          |
-| `void setScrollModeAll(uint8_t mode)`                         | Set scroll mode for all displays.                                              |
-| `void setBrightness(uint8_t brightness)`                      | Set global NeoPixel brightness (0-255).                                        |
+| `void setScrollModeAll(uint8_t mode)`                         | Set scroll mode for all displays.                                              |     | `void setScrollSpeed(uint8_t ms)`        | Set scroll speed in ms per pixel step (default `SCROLL_STEP_MS`). |
+| `void setScrollBlank(bool enabled)`                           | Enable/disable blank frame between queued scroll items.                        |
+| `void clearQueue(uint8_t idx)`                                | Discard pending scroll queue for one display.                                  |
+| `void clearQueueAll()`                                        | Discard scroll queues on all displays.                                         |     | `void setBrightness(uint8_t brightness)` | Set global NeoPixel brightness (0-255).                           |
 | `void clearAll()`                                             | Clear all displays.                                                            |
 | `void update()`                                               | Drive scroll animations and push pixels. Call every `loop()`. No-op when idle. |
 | `void showTestPattern()`                                      | Light each display in sequence at start-up.                                    |
@@ -384,6 +461,11 @@ Declared in `src/DisplayManager.h`, implemented in `src/DisplayManager.cpp`.
 | `scrollOffset`   | `int8_t`        | Animation progress (0 = done)               |
 | `scrollLastStep` | `unsigned long` | `millis()` timestamp of last tick           |
 | `dirty`          | `bool`          | Needs instant (non-scroll) redraw           |
+| `scrollJustDone` | `bool`          | Set once when scroll completes (one-shot)   |
+| `queue[10][32]`  | `char[][]`      | Ring buffer of pending scroll items         |
+| `queueHead`      | `uint8_t`       | Next slot to dequeue                        |
+| `queueTail`      | `uint8_t`       | Next slot to enqueue                        |
+| `queueCount`     | `uint8_t`       | Items currently in queue                    |
 
 ---
 
@@ -392,22 +474,23 @@ Declared in `src/DisplayManager.h`, implemented in `src/DisplayManager.cpp`.
 All defines live in `src/config.h` and can be overridden with
 `-D` build flags in `platformio.ini`.
 
-| Define               | Default                | Description                        |
-| -------------------- | ---------------------- | ---------------------------------- |
-| `USE_WIFI`           | (fallback)             | Use WiFi for network               |
-| `USE_ETHERNET_W5500` | —                      | Use W5500 Ethernet instead of WiFi |
-| `SERIAL_CMD_ENABLED` | `1`                    | Enable serial text command input   |
-| `NEOPIXEL_PIN`       | `2`                    | GPIO for NeoPixel data line        |
-| `NUM_DISPLAYS`       | `6`                    | Number of 32×8 tiles               |
-| `MATRIX_TILE_WIDTH`  | `32`                   | Pixels per tile (width)            |
-| `MATRIX_TILE_HEIGHT` | `8`                    | Pixels per tile (height)           |
-| `DEFAULT_BRIGHTNESS` | `20`                   | Start-up brightness (0-255)        |
-| `OSC_PORT`           | `9000`                 | UDP port for OSC messages          |
-| `SCROLL_STEP_MS`     | `15`                   | Milliseconds per scroll pixel step |
-| `MATRIX_LAYOUT`      | see config.h           | NeoMatrix wiring flags             |
-| `LED_TYPE`           | `NEO_GRB + NEO_KHZ800` | NeoPixel colour order + speed      |
-| `ETH_CS_PIN`         | `6`                    | SPI chip-select for W5500          |
-| `ETH_RST_PIN`        | `7`                    | Reset pin for W5500                |
+| Define               | Default                | Description                         |
+| -------------------- | ---------------------- | ----------------------------------- |
+| `USE_WIFI`           | (fallback)             | Use WiFi for network                |
+| `USE_ETHERNET_W5500` | —                      | Use W5500 Ethernet instead of WiFi  |
+| `SERIAL_CMD_ENABLED` | `1`                    | Enable serial text command input    |
+| `NEOPIXEL_PIN`       | `2`                    | GPIO for NeoPixel data line         |
+| `NUM_DISPLAYS`       | `6`                    | Number of 32×8 tiles                |
+| `MATRIX_TILE_WIDTH`  | `32`                   | Pixels per tile (width)             |
+| `MATRIX_TILE_HEIGHT` | `8`                    | Pixels per tile (height)            |
+| `DEFAULT_BRIGHTNESS` | `20`                   | Start-up brightness (0-255)         |
+| `OSC_PORT`           | `9000`                 | UDP port for OSC messages           |
+| `SCROLL_STEP_MS`     | `25`                   | Milliseconds per scroll pixel step  |
+| `SCROLL_QUEUE_SIZE`  | `10`                   | Max queued scroll items per display |
+| `MATRIX_LAYOUT`      | see config.h           | NeoMatrix wiring flags              |
+| `LED_TYPE`           | `NEO_GRB + NEO_KHZ800` | NeoPixel colour order + speed       |
+| `ETH_CS_PIN`         | `6`                    | SPI chip-select for W5500           |
+| `ETH_RST_PIN`        | `7`                    | Reset pin for W5500                 |
 
 ---
 

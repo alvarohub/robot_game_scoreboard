@@ -2,6 +2,10 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef USE_M5UNIFIED
+  #include <M5Unified.h>
+#endif
+
 #ifdef USE_WIFI
   #include "credentials.h"        // defines WIFI_SSID, WIFI_PASSWORD
 #endif
@@ -92,9 +96,14 @@ IPAddress OSCHandler::localIP() {
 //    /display/<N>/clear        — clear one display
 //    /display/<N>/brightness   — per-display brightness (global for now)
 //    /display/<N>/scroll       — scroll mode: 0=instant, 1=up, 2=down
+//    /display/<N>/clearqueue   — discard pending scroll queue for one display
 //    /brightness               — global brightness (int arg 0-255)
 //    /scroll                   — set scroll mode for ALL displays (int 0-2)
-//    /clearall  or  /clear     — clear every display
+//    /scrollspeed              — scroll speed in ms per pixel step (int, default 25)
+//    /scrollblank              — blank frame between scroll items: 0=off, 1=on
+//    /clearqueue               — discard scroll queues on all displays
+//    /clearall  or  /clear     — clear every display (also flushes queues)
+//    /status                   — replies "ANIMATING 0" or "ANIMATING 1"
 //
 //  Display numbers are 1-based in OSC (mapped to 0-based internally).
 // ══════════════════════════════════════════════════════════════
@@ -154,6 +163,10 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 Serial.printf("D%d scroll → %d\n", displayNum, mode);
             }
         }
+        else if (strcmp(subCmd, "clearqueue") == 0) {
+            _display.clearQueue(idx);
+            Serial.printf("D%d queue cleared\n", displayNum);
+        }
     }
     // ── /brightness ──────────────────────────────────────────
     else if (strcmp(address, "/brightness") == 0) {
@@ -170,11 +183,34 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             Serial.printf("All scroll → %d\n", mode);
         }
     }
+    // ── /scrollspeed — scroll animation speed (ms per pixel) ─
+    else if (strcmp(address, "/scrollspeed") == 0) {
+        if (msg.isInt(0)) {
+            _display.setScrollSpeed(msg.getInt(0));
+            Serial.printf("Scroll speed → %ld ms\n", (long)msg.getInt(0));
+        }
+    }
+    // ── /scrollblank — blank frame between scroll items ──────
+    else if (strcmp(address, "/scrollblank") == 0) {
+        if (msg.isInt(0)) {
+            _display.setScrollBlank(msg.getInt(0) != 0);
+            Serial.printf("Scroll blank → %s\n", msg.getInt(0) ? "ON" : "OFF");
+        }
+    }
+    // ── /clearqueue — flush all scroll queues ────────────────
+    else if (strcmp(address, "/clearqueue") == 0) {
+        _display.clearQueueAll();
+        Serial.println("All queues cleared");
+    }
     // ── /clearall  |  /clear ─────────────────────────────────
     else if (strcmp(address, "/clearall") == 0 ||
              strcmp(address, "/clear")    == 0) {
         _display.clearAll();
         Serial.println("All displays cleared");
+    }
+    // ── /status — query animation state ──────────────────────
+    else if (strcmp(address, "/status") == 0) {
+        Serial.printf("ANIMATING %d\n", _display.isAnimating() ? 1 : 0);
     }
     else {
         Serial.printf("Unknown OSC: %s\n", address);
@@ -210,6 +246,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
 void OSCHandler::processSerial() {
     while (Serial.available()) {
         char c = Serial.read();
+        Serial.write(c);  // echo back for user feedback
         if (c == '\n' || c == '\r') {
             if (_serialPos > 0) {
                 _serialBuf[_serialPos] = '\0';
@@ -222,6 +259,21 @@ void OSCHandler::processSerial() {
         // else: overflow — silently drop until newline
     }
 }
+
+#ifdef USE_M5UNIFIED
+static void _lcdSerialDebug(const char* line) {
+    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.setTextColor(TFT_GREEN, TFT_BLACK);
+    M5.Display.setTextSize(2);          // 12×16 px — readable on 128×128
+    M5.Display.setTextDatum(TL_DATUM);  // top-left
+    M5.Display.drawString("Serial rx:", 2, 2);
+    // Show the received command (wraps on 128px-wide screen)
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Display.setTextWrap(true);
+    M5.Display.setCursor(2, 24);
+    M5.Display.print(line);
+}
+#endif
 
 void OSCHandler::_handleSerialLine(const char* line) {
     // Skip leading whitespace
@@ -295,6 +347,10 @@ void OSCHandler::_handleSerialLine(const char* line) {
         }
     }
     Serial.println();
+
+#ifdef USE_M5UNIFIED
+    _lcdSerialDebug(line);
+#endif
 
     _processMessage(msg);
 }

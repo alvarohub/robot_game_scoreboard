@@ -12,6 +12,7 @@ Usage:
 
 import sys
 import time
+import colorsys
 import serial
 import serial.tools.list_ports
 
@@ -36,6 +37,45 @@ def send(ser, cmd):
     time.sleep(0.15)
 
 
+def wait_scroll_done(ser, display_num=1, timeout_sec=2.0):
+    """Wait until the firmware sends 'SCROLL_DONE <N>' for the given display.
+
+    Returns True if SCROLL_DONE was received, False on timeout.
+    Any other serial output is printed as it arrives.
+    """
+    tag = f"SCROLL_DONE {display_num}"
+    t0 = time.time()
+    while time.time() - t0 < timeout_sec:
+        if ser.in_waiting:
+            line = ser.readline().decode("utf-8", errors="replace").rstrip()
+            if tag in line:
+                return True
+            if line:
+                print(f"  [fw] {line}")
+        else:
+            time.sleep(0.01)
+    print(f"  ⚠ timeout waiting for {tag}")
+    return False
+
+
+def wait_for_ready(ser, timeout_sec=25):
+    """Read serial lines until we see 'Ready' from the firmware.
+
+    Returns True if 'Ready' was seen, False on timeout.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout_sec:
+        if ser.in_waiting:
+            line = ser.readline().decode("utf-8", errors="replace")
+            print(f"  [boot] {line}", end="" if line.endswith("\n") else "\n")
+            if "Ready" in line:
+                print("Board is ready!")
+                return True
+        else:
+            time.sleep(0.1)
+    return False
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_serial_port()
     if port is None:
@@ -45,42 +85,81 @@ def main():
     baud = 115200
     print(f"Opening {port} at {baud} baud …")
     ser = serial.Serial(port, baud, timeout=1)
-    time.sleep(2)  # wait for ESP32 to reset after DTR toggle
 
-    # Drain any boot messages
-    while ser.in_waiting:
-        print(ser.readline().decode("utf-8", errors="replace"), end="")
+    # Opening the port may reset the ESP32-S3 (DTR toggle).
+    # Wait for the firmware to finish booting and print "Ready".
+    # print("Waiting for board to be ready …")
+    # if not wait_for_ready(ser, timeout_sec=5):
+    #     print("No 'Ready' seen (board may already be running). Proceeding …")
 
     print("\n── Setting scores ──")
-    send(ser, '/display/1/text "P1"')
-    send(ser, "/display/2 100")
-    send(ser, '/display/3/text "P2"')
-    send(ser, "/display/4 200")
-    send(ser, '/display/5/text "TM"')
-    send(ser, "/display/6 59")
+    send(ser, '/display/1/text "HELLO"')
+    time.sleep(1)
+    send(ser, "/display/1 1234")
     time.sleep(2)
 
-    print("\n── Setting colours ──")
-    send(ser, "/display/1/color 255 0 0")    # red
-    send(ser, "/display/2/color 255 0 0")
-    send(ser, "/display/3/color 0 0 255")    # blue
-    send(ser, "/display/4/color 0 0 255")
-    send(ser, "/display/5/color 0 255 0")    # green
-    send(ser, "/display/6/color 0 255 0")
-    time.sleep(2)
+    # print("\n── Setting colours ──")
+    # send(ser, "/display/1/color 255 0 0")    # red
+    # send(ser, "/display/2/color 255 0 0")
+    # send(ser, "/display/3/color 0 0 255")    # blue
+    # send(ser, "/display/4/color 0 0 255")
+    # send(ser, "/display/5/color 0 255 0")    # green
+    # send(ser, "/display/6/color 0 255 0")
+    # time.sleep(2)
 
-    print("\n── Brightness sweep ──")
-    for b in [10, 40, 80, 40, 20]:
-        send(ser, f"/brightness {b}")
-        time.sleep(0.5)
+    print("\n── Brightness breathe ──")
+    import math
+    steps_per_cycle = 40        # 40 steps × 25 ms = 1 s per cycle
+    for cycle in range(4):
+        for s in range(steps_per_cycle):
+            # sine wave 0→1→0 over one cycle
+            b = int(5 + 75 * (0.5 - 0.5 * math.cos(2 * math.pi * s / steps_per_cycle)))
+            send(ser, f"/brightness {b}")
+            time.sleep(0.5 / steps_per_cycle)
 
     print("\n── Scroll mode test ──")
-    send(ser, "/display/2/scroll 1")
-    send(ser, "/display/2 999")
-    time.sleep(1)
-    send(ser, "/display/2 888")
-    time.sleep(1)
-    send(ser, "/display/2/scroll 0")
+    send(ser, "/display/1/scroll 1") # set scroll mode up
+    send(ser, "/display/1 999")
+    wait_scroll_done(ser, 1)
+    send(ser, "/display/1 888")
+    wait_scroll_done(ser, 1)
+    
+    send(ser, "/display/1/scroll 2") # set scroll mode down
+    send(ser, "/display/1 999")
+    wait_scroll_done(ser, 1)
+    send(ser, "/display/1 888")
+    wait_scroll_done(ser, 1)
+
+    # Fire-and-forget: send many values quickly — the queue buffers them
+    # and they scroll one-by-one automatically.
+    print("\n── Scroll queue test (fire-and-forget 0→20) ──")
+    send(ser, "/display/1/scroll 1")
+    for n in range(0, 21):
+        send(ser, f"/display/1 {n}")
+    # Now just wait until the board is idle (all queued scrolls finish)
+    print("  Waiting for queue to drain …")
+    while True:
+        if not wait_scroll_done(ser, 1, timeout_sec=3.0):
+            break  # timeout = no more SCROLL_DONE coming → queue is empty
+
+    # Switch to instant mode — automatically flushes any remaining queue
+    print("\n── Instant mode (flush queue) ──")
+    send(ser, "/display/1/scroll 0")
+    time.sleep(0.5)
+
+    # Scroll countdown 9999→9980 with rainbow colours and scroll blank
+    print("\n── Scroll countdown 9999→9980 (rainbow, blank between) ──")
+    send(ser, "/display/1/scroll 2")  # scroll down
+    send(ser, "/scrollblank 1")       # blank frame between items
+    steps = list(range(9999, 9979, -1))
+    for i, n in enumerate(steps):
+        hue = i / len(steps)  # 0→1 over the countdown
+        r, g, b = [int(255 * c) for c in colorsys.hsv_to_rgb(hue, 1.0, 1.0)]
+        send(ser, f"/display/1/color {r} {g} {b}")
+        send(ser, f"/display/1 {n}")
+        time.sleep(1)
+    send(ser, "/scrollblank 0")       # restore default
+   
 
     print("\n── Clear all ──")
     send(ser, "/clearall")

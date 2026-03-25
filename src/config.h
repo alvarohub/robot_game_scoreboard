@@ -23,7 +23,7 @@
 #endif
 
 #define NUM_DISPLAYS        1      // logical score displays
-#define MATRIX_TILE_WIDTH   8      // pixels per tile (width)
+#define MATRIX_TILE_WIDTH   32      // pixels per tile (width)
 #define MATRIX_TILE_HEIGHT  8      // pixels per tile (height)
 #define TOTAL_WIDTH  (NUM_DISPLAYS * MATRIX_TILE_WIDTH)
 #define TOTAL_HEIGHT MATRIX_TILE_HEIGHT
@@ -66,7 +66,7 @@
 // Seconds to wait for button press before skipping WiFi.
 // Set to 0 to always connect without asking.
 #ifndef WIFI_PROMPT_SECONDS
-  #define WIFI_PROMPT_SECONDS 10
+  #define WIFI_PROMPT_SECONDS 2
 #endif
 
 // ── Ethernet W5500 pins (M5Stack Ethernet Unit) ─────────────

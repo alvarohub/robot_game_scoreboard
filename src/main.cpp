@@ -27,14 +27,14 @@ static void lcdStatus(const char* line1, const char* line2 = nullptr,
                       uint32_t color = TFT_WHITE) {
     M5.Display.fillScreen(TFT_BLACK);
     M5.Display.setTextColor(color, TFT_BLACK);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);          // 12×16 px chars — readable on 128×128
     M5.Display.setTextDatum(MC_DATUM);  // middle-centre
     M5.Display.drawString(line1, M5.Display.width() / 2,
-                          line2 ? M5.Display.height() / 2 - 10
+                          line2 ? M5.Display.height() / 2 - 14
                                 : M5.Display.height() / 2);
     if (line2) {
         M5.Display.drawString(line2, M5.Display.width() / 2,
-                              M5.Display.height() / 2 + 10);
+                              M5.Display.height() / 2 + 14);
     }
 }
 #endif
@@ -43,8 +43,10 @@ static void lcdStatus(const char* line1, const char* line2 = nullptr,
 void setup() {
 #ifdef USE_M5UNIFIED
     auto cfg = M5.config();
-    // cfg.serial_baudrate = 115200;   // default
+    cfg.serial_baudrate = 115200;
     M5.begin(cfg);
+    Serial.begin(115200);            // explicit init for USB-CDC on ESP32-S3
+    delay(1000);                     // let USB-CDC settle
     M5.Display.setRotation(0);
     lcdStatus("Scoreboard", "v0.1", TFT_CYAN);
 #else
@@ -143,4 +145,11 @@ void loop() {
     osc.processSerial(); // read & dispatch serial text commands
 #endif
     display.update();    // push pixel changes to the strip (no-op when idle)
+
+    // Notify over serial when a scroll animation finishes
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        if (display.scrollFinished(i)) {
+            Serial.printf("SCROLL_DONE %d\n", i + 1);   // 1-based
+        }
+    }
 }

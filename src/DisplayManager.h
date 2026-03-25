@@ -17,7 +17,12 @@
 
 // Speed of scroll animation (ms per pixel step).  8 pixels → ~120 ms total.
 #ifndef SCROLL_STEP_MS
-  #define SCROLL_STEP_MS 15
+  #define SCROLL_STEP_MS 25
+#endif
+
+// Maximum pending items in the per-display scroll queue.
+#ifndef SCROLL_QUEUE_SIZE
+  #define SCROLL_QUEUE_SIZE 10
 #endif
 
 class DisplayManager {
@@ -34,9 +39,24 @@ public:
 
     // ── Scroll mode ─────────────────────────────────────────────────
     /// Set per-display scroll mode: SCROLL_NONE (0), SCROLL_UP (1), SCROLL_DOWN (2).
+    /// Switching to SCROLL_NONE automatically flushes the queue and shows
+    /// the last queued value instantly.
     void setScrollMode(uint8_t displayIndex, uint8_t mode);
     /// Set scroll mode for ALL displays at once.
     void setScrollModeAll(uint8_t mode);
+
+    /// Set scroll animation speed (ms per pixel step).  Default = SCROLL_STEP_MS.
+    void setScrollSpeed(uint8_t ms);
+
+    /// Enable/disable a brief blank frame between consecutive scroll items.
+    /// Helps prevent visual "bleeding" at high scroll speeds. Default = off.
+    void setScrollBlank(bool enabled);
+
+    // ── Scroll queue ────────────────────────────────────────────────
+    /// Discard all pending queued text for one display.
+    void clearQueue(uint8_t displayIndex);
+    /// Discard pending queued text for ALL displays.
+    void clearQueueAll();
 
     // ── Global operations ───────────────────────────────────────────
     void setBrightness(uint8_t brightness);
@@ -54,6 +74,15 @@ public:
     /// Returns true if any display is currently mid-scroll.
     bool isAnimating() const;
 
+    /// Returns true (once) if display `idx` just finished a scroll animation.
+    /// The flag auto-clears after reading, so call once per loop iteration.
+    bool scrollFinished(uint8_t idx);
+
+    /// Expected scroll duration in milliseconds (based on current settings).
+    unsigned long scrollDurationMs() const {
+        return (unsigned long)MATRIX_TILE_HEIGHT * _scrollStepMs;
+    }
+
 private:
     Adafruit_NeoMatrix _matrix;
 
@@ -65,12 +94,21 @@ private:
         int8_t   scrollOffset;   // animation progress: 0 = done, ±1…8 = in transit
         unsigned long scrollLastStep;  // millis() of last animation tick
         bool     dirty;          // needs instant redraw (non-scroll)
+        bool     scrollJustDone; // set once when scroll completes, cleared by scrollFinished()
+        // ── Scroll queue (ring buffer) ──
+        char     queue[SCROLL_QUEUE_SIZE][32];
+        uint8_t  queueHead;      // next slot to dequeue
+        uint8_t  queueTail;      // next slot to enqueue
+        uint8_t  queueCount;     // items in queue
     };
     DisplayState _displays[NUM_DISPLAYS];
+    uint8_t _scrollStepMs;
+    bool    _scrollBlank;     // insert blank frame between queued scrolls
     bool _needsUpdate;
 
     void        _drawDisplay(uint8_t index);
     void        _drawDisplayScrollFrame(uint8_t index);
+    void        _startScroll(uint8_t idx, const char* newText);
     const char* _fitTextRight(const char* text);
     int16_t     _centerTextX(uint8_t index, const char* text);
 };

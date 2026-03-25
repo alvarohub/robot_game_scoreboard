@@ -9,7 +9,9 @@ DisplayManager::DisplayManager()
           NEOPIXEL_PIN,
           MATRIX_LAYOUT,
           LED_TYPE),
-      _needsUpdate(false)
+      _needsUpdate(false),
+      _scrollStepMs(SCROLL_STEP_MS),
+      _scrollBlank(false)
 {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         _displays[i].text[0]    = '\0';
@@ -19,6 +21,10 @@ DisplayManager::DisplayManager()
         _displays[i].scrollOffset    = 0;
         _displays[i].scrollLastStep  = 0;
         _displays[i].dirty      = true;
+        _displays[i].scrollJustDone = false;
+        _displays[i].queueHead  = 0;
+        _displays[i].queueTail  = 0;
+        _displays[i].queueCount = 0;
     }
 }
 
@@ -33,26 +39,37 @@ void DisplayManager::begin() {
 }
 
 // ── Per-display setters ──────────────────────────────────────
+void DisplayManager::setScrollSpeed(uint8_t ms) {
+    _scrollStepMs = ms > 0 ? ms : 1;
+}
+
+void DisplayManager::setScrollBlank(bool enabled) {
+    _scrollBlank = enabled;
+}
+
 void DisplayManager::setText(uint8_t idx, const char* text) {
     if (idx >= NUM_DISPLAYS) return;
 
-    // Nothing to do if the text is identical
+    // Nothing to do if the text is identical to the current target
     if (strcmp(_displays[idx].text, text) == 0) return;
 
     if (_displays[idx].scrollMode != SCROLL_NONE) {
-        // Save old text for the scroll-out animation
-        strncpy(_displays[idx].oldText, _displays[idx].text,
-                sizeof(_displays[idx].oldText) - 1);
-        _displays[idx].oldText[sizeof(_displays[idx].oldText) - 1] = '\0';
+        if (_displays[idx].scrollOffset > 0) {
+            // Scroll in progress — queue this text if there is room
+            if (_displays[idx].queueCount < SCROLL_QUEUE_SIZE) {
+                strncpy(_displays[idx].queue[_displays[idx].queueTail],
+                        text, 31);
+                _displays[idx].queue[_displays[idx].queueTail][31] = '\0';
+                _displays[idx].queueTail =
+                    (_displays[idx].queueTail + 1) % SCROLL_QUEUE_SIZE;
+                _displays[idx].queueCount++;
+            }
+            // else: queue full — silently drop
+            return;
+        }
 
-        // Copy new text
-        strncpy(_displays[idx].text, text, sizeof(_displays[idx].text) - 1);
-        _displays[idx].text[sizeof(_displays[idx].text) - 1] = '\0';
-
-        // Start the scroll animation (1 → MATRIX_TILE_HEIGHT)
-        _displays[idx].scrollOffset   = 1;
-        _displays[idx].scrollLastStep = millis();
-        _needsUpdate = true;
+        // No animation running — start one immediately
+        _startScroll(idx, text);
     } else {
         // Instant mode
         strncpy(_displays[idx].text, text, sizeof(_displays[idx].text) - 1);
@@ -82,11 +99,43 @@ void DisplayManager::setScrollMode(uint8_t idx, uint8_t mode) {
     if (idx >= NUM_DISPLAYS) return;
     if (mode > SCROLL_DOWN) mode = SCROLL_NONE;
     _displays[idx].scrollMode = mode;
+
+    if (mode == SCROLL_NONE) {
+        // Flush the queue: show the last queued value instantly (skip the rest)
+        if (_displays[idx].queueCount > 0) {
+            // Jump to the newest (last enqueued) item
+            uint8_t lastIdx = (_displays[idx].queueTail + SCROLL_QUEUE_SIZE - 1)
+                              % SCROLL_QUEUE_SIZE;
+            strncpy(_displays[idx].text,
+                    _displays[idx].queue[lastIdx], 31);
+            _displays[idx].text[31] = '\0';
+        }
+        _displays[idx].queueHead  = 0;
+        _displays[idx].queueTail  = 0;
+        _displays[idx].queueCount = 0;
+        _displays[idx].scrollOffset = 0;
+        _displays[idx].oldText[0] = '\0';
+        _displays[idx].dirty = true;
+        _needsUpdate = true;
+    }
 }
 
 void DisplayManager::setScrollModeAll(uint8_t mode) {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
         setScrollMode(i, mode);
+}
+
+// ── Queue management ─────────────────────────────────────────────
+void DisplayManager::clearQueue(uint8_t idx) {
+    if (idx >= NUM_DISPLAYS) return;
+    _displays[idx].queueHead  = 0;
+    _displays[idx].queueTail  = 0;
+    _displays[idx].queueCount = 0;
+}
+
+void DisplayManager::clearQueueAll() {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        clearQueue(i);
 }
 
 // ── Global setters ───────────────────────────────────────────
@@ -102,6 +151,9 @@ void DisplayManager::clearAll() {
         _displays[i].text[0]    = '\0';
         _displays[i].oldText[0] = '\0';
         _displays[i].scrollOffset = 0;
+        _displays[i].queueHead  = 0;
+        _displays[i].queueTail  = 0;
+        _displays[i].queueCount = 0;
         _displays[i].dirty = true;
     }
     _matrix.fillScreen(0);
@@ -116,7 +168,7 @@ void DisplayManager::update() {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         // ── Scroll animation in progress? ────────────────────
         if (_displays[i].scrollOffset > 0) {
-            if (now - _displays[i].scrollLastStep >= SCROLL_STEP_MS) {
+            if (now - _displays[i].scrollLastStep >= _scrollStepMs) {
                 _displays[i].scrollLastStep = now;
                 _drawDisplayScrollFrame(i);
                 _displays[i].scrollOffset++;
@@ -125,7 +177,34 @@ void DisplayManager::update() {
                     // Animation complete — snap to final state
                     _displays[i].scrollOffset = 0;
                     _displays[i].oldText[0] = '\0';
-                    _drawDisplay(i);
+                    _displays[i].scrollJustDone = true;
+
+                    // Dequeue next item if available
+                    if (_displays[i].queueCount > 0) {
+                        char next[32];
+                        strncpy(next,
+                                _displays[i].queue[_displays[i].queueHead], 31);
+                        next[31] = '\0';
+                        _displays[i].queueHead =
+                            (_displays[i].queueHead + 1) % SCROLL_QUEUE_SIZE;
+                        _displays[i].queueCount--;
+
+                        if (_scrollBlank) {
+                            // Show a blank frame briefly before starting next scroll
+                            int16_t x0 = i * MATRIX_TILE_WIDTH;
+                            _matrix.fillRect(x0, 0, MATRIX_TILE_WIDTH, MATRIX_TILE_HEIGHT, 0);
+                            // Store new text so _startScroll picks it up on next update
+                            strncpy(_displays[i].text, next,
+                                    sizeof(_displays[i].text) - 1);
+                            _displays[i].text[sizeof(_displays[i].text) - 1] = '\0';
+                            _displays[i].dirty = true;
+                        }
+
+                        _startScroll(i, next);
+                        anyAnimating = true;
+                    } else {
+                        _drawDisplay(i);
+                    }
                 } else {
                     anyAnimating = true;
                 }
@@ -156,6 +235,15 @@ void DisplayManager::update() {
 bool DisplayManager::isAnimating() const {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
         if (_displays[i].scrollOffset > 0) return true;
+    return false;
+}
+
+bool DisplayManager::scrollFinished(uint8_t idx) {
+    if (idx >= NUM_DISPLAYS) return false;
+    if (_displays[idx].scrollJustDone) {
+        _displays[idx].scrollJustDone = false;
+        return true;
+    }
     return false;
 }
 
@@ -206,6 +294,22 @@ void DisplayManager::startDisplay(unsigned long durationMs) {
 // ══════════════════════════════════════════════════════════════
 //  Private helpers
 // ══════════════════════════════════════════════════════════════
+
+void DisplayManager::_startScroll(uint8_t idx, const char* newText) {
+    // Save current text as the old (scroll-out) text
+    strncpy(_displays[idx].oldText, _displays[idx].text,
+            sizeof(_displays[idx].oldText) - 1);
+    _displays[idx].oldText[sizeof(_displays[idx].oldText) - 1] = '\0';
+
+    // Set new target text
+    strncpy(_displays[idx].text, newText, sizeof(_displays[idx].text) - 1);
+    _displays[idx].text[sizeof(_displays[idx].text) - 1] = '\0';
+
+    // Kick off the animation
+    _displays[idx].scrollOffset   = 1;
+    _displays[idx].scrollLastStep = millis();
+    _needsUpdate = true;
+}
 
 // Return a pointer into `text` at the rightmost substring that fits
 // within MATRIX_TILE_WIDTH.  E.g. "1234" on an 8-px tile → "4".

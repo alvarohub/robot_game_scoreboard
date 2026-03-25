@@ -92,15 +92,21 @@ python test_osc_send.py 192.168.1.42   # replace with the board's IP
 
 Displays are numbered **1 – 6** in OSC messages.
 
-| Address                   | Arguments                        | Example                      | Effect                |
-| ------------------------- | -------------------------------- | ---------------------------- | --------------------- |
-| `/display/<N>`            | `string` or `int`                | `/display/1` `"1234"`        | Set display 1 text    |
-| `/display/<N>/text`       | `string`                         | `/display/3/text` `"HI"`     | Same as above         |
-| `/display/<N>/color`      | `int` `int` `int` (R G B, 0-255) | `/display/2/color` `255 0 0` | Red text on display 2 |
-| `/display/<N>/clear`      | —                                | `/display/4/clear`           | Clear display 4       |
-| `/display/<N>/brightness` | `int` (0-255)                    | `/display/1/brightness` `80` | Set global brightness |
-| `/brightness`             | `int` (0-255)                    | `/brightness` `40`           | Set global brightness |
-| `/clearall` or `/clear`   | —                                | `/clearall`                  | Clear all displays    |
+| Address                   | Arguments                        | Example                      | Effect                 |
+| ------------------------- | -------------------------------- | ---------------------------- | ---------------------- |
+| `/display/<N>`            | `string` or `int`                | `/display/1` `"1234"`        | Set display 1 text     |
+| `/display/<N>/text`       | `string`                         | `/display/3/text` `"HI"`     | Same as above          |
+| `/display/<N>/color`      | `int` `int` `int` (R G B, 0-255) | `/display/2/color` `255 0 0` | Red text on display 2  |
+| `/display/<N>/clear`      | —                                | `/display/4/clear`           | Clear display 4        |
+| `/display/<N>/brightness` | `int` (0-255)                    | `/display/1/brightness` `80` | Set global brightness  |
+| `/display/<N>/scroll`     | `int` (0/1/2)                    | `/display/2/scroll` `1`      | Scroll mode: up        |
+| `/brightness`             | `int` (0-255)                    | `/brightness` `40`           | Set global brightness  |
+| `/scroll`                 | `int` (0/1/2)                    | `/scroll` `1`                | All displays scroll up |
+| `/scrollspeed`            | `int` (ms)                       | `/scrollspeed` `10`          | Scroll speed per pixel |
+| `/scrollblank`            | `int` (0/1)                      | `/scrollblank` `1`           | Blank between scrolls  |
+| `/clearqueue`             | —                                | `/clearqueue`                | Flush scroll queues    |
+| `/clearall` or `/clear`   | —                                | `/clearall`                  | Clear all displays     |
+| `/status`                 | —                                | `/status`                    | Query animation state  |
 
 All commands also work over **USB-Serial** as plain text lines (same syntax,
 newline-terminated). No network required — great for testing and standalone use.
@@ -117,15 +123,17 @@ OSC-specific protocol details: [`docs/osc_protocol.md`](docs/osc_protocol.md)
 All tunables live in [`src/config.h`](src/config.h) with sensible defaults.
 Most can also be overridden via `-D` build flags in `platformio.ini`.
 
-| Define               | Default      | Description                 |
-| -------------------- | ------------ | --------------------------- |
-| `NEOPIXEL_PIN`       | `2`          | GPIO for NeoPixel data      |
-| `NUM_DISPLAYS`       | `6`          | Number of 32×8 tiles        |
-| `MATRIX_TILE_WIDTH`  | `32`         | Pixels per tile (width)     |
-| `MATRIX_TILE_HEIGHT` | `8`          | Pixels per tile (height)    |
-| `DEFAULT_BRIGHTNESS` | `20`         | Start-up brightness (0-255) |
-| `OSC_PORT`           | `9000`       | UDP port for OSC            |
-| `MATRIX_LAYOUT`      | see config.h | NeoMatrix wiring flags      |
+| Define               | Default      | Description                  |
+| -------------------- | ------------ | ---------------------------- |
+| `NEOPIXEL_PIN`       | `2`          | GPIO for NeoPixel data       |
+| `NUM_DISPLAYS`       | `6`          | Number of 32×8 tiles         |
+| `MATRIX_TILE_WIDTH`  | `32`         | Pixels per tile (width)      |
+| `MATRIX_TILE_HEIGHT` | `8`          | Pixels per tile (height)     |
+| `DEFAULT_BRIGHTNESS` | `20`         | Start-up brightness (0-255)  |
+| `OSC_PORT`           | `9000`       | UDP port for OSC             |
+| `SCROLL_STEP_MS`     | `25`         | Default ms per scroll step   |
+| `SCROLL_QUEUE_SIZE`  | `10`         | Max queued items per display |
+| `MATRIX_LAYOUT`      | see config.h | NeoMatrix wiring flags       |
 
 > If your panels show garbled output, you likely need to change
 > `MATRIX_LAYOUT` (row vs. column, progressive vs. zigzag).
