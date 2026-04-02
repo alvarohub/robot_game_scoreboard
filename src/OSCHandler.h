@@ -34,6 +34,12 @@ public:
     void processSerial();
 #endif
 
+#ifdef USE_RS485
+    /// Call every loop() — reads RS485 (Serial2) lines and executes them
+    /// as if they were OSC messages.
+    void processRS485();
+#endif
+
     /// The IP address assigned to this device.
     IPAddress localIP();
 
@@ -52,7 +58,15 @@ private:
     static constexpr size_t SERIAL_BUF_SIZE = 128;
     char    _serialBuf[SERIAL_BUF_SIZE];
     uint8_t _serialPos = 0;
+#endif
 
+#ifdef USE_RS485
+    static constexpr size_t RS485_BUF_SIZE = 128;
+    char    _rs485Buf[RS485_BUF_SIZE];
+    uint8_t _rs485Pos = 0;
+#endif
+
+#if SERIAL_CMD_ENABLED || defined(USE_RS485)
     void _handleSerialLine(const char* line);
 #endif
 };

@@ -1,6 +1,6 @@
 # Command Reference
 
-The scoreboard accepts commands via **three interfaces** — all sharing
+The scoreboard accepts commands via **four interfaces** — all sharing
 the same message set:
 
 | Interface             | Transport       | When to use                                    |
@@ -8,8 +8,9 @@ the same message set:
 | **OSC over WiFi**     | UDP port 9000   | Production / wireless control                  |
 | **OSC over Ethernet** | UDP port 9000   | Production / wired PoE (low latency, reliable) |
 | **Serial text**       | USB 115200 baud | Bench testing, standalone use, no network      |
+| **RS485 text**        | Serial2 115200  | Long-distance wired (up to 1200 m), multi-drop |
 
-> **Architecture note:** Serial commands are parsed into proxy
+> **Architecture note:** Serial and RS485 commands are parsed into proxy
 > `OSCMessage` objects and routed through exactly the same handler
 > as network OSC — so behaviour is identical regardless of interface.
 

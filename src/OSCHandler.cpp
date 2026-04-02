@@ -212,6 +212,11 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
     else if (strcmp(address, "/status") == 0) {
         Serial.printf("ANIMATING %d\n", _display.isAnimating() ? 1 : 0);
     }
+    // ── /rasterscan — light each LED in sequence ─────────────
+    else if (strcmp(address, "/rasterscan") == 0) {
+        uint16_t ms = (msg.size() >= 1 && msg.isInt(0)) ? msg.getInt(0) : 30;
+        _display.showRasterScan(ms);
+    }
     else {
         Serial.printf("Unknown OSC: %s\n", address);
     }
@@ -259,6 +264,32 @@ void OSCHandler::processSerial() {
         // else: overflow — silently drop until newline
     }
 }
+
+#endif  // SERIAL_CMD_ENABLED
+
+// ── RS485 command interface (same text protocol as USB Serial) ─
+#ifdef USE_RS485
+
+void OSCHandler::processRS485() {
+    while (Serial2.available()) {
+        char c = Serial2.read();
+        if (c == '\n' || c == '\r') {
+            if (_rs485Pos > 0) {
+                _rs485Buf[_rs485Pos] = '\0';
+                Serial.printf("RS485 rx: %s\n", _rs485Buf);
+                _handleSerialLine(_rs485Buf);
+                _rs485Pos = 0;
+            }
+        } else if (_rs485Pos < RS485_BUF_SIZE - 1) {
+            _rs485Buf[_rs485Pos++] = c;
+        }
+    }
+}
+
+#endif  // USE_RS485
+
+// ── Shared text-line command parser (used by USB Serial & RS485) ──
+#if SERIAL_CMD_ENABLED || defined(USE_RS485)
 
 #ifdef USE_M5UNIFIED
 static void _lcdSerialDebug(const char* line) {
@@ -355,4 +386,4 @@ void OSCHandler::_handleSerialLine(const char* line) {
     _processMessage(msg);
 }
 
-#endif
+#endif  // SERIAL_CMD_ENABLED || USE_RS485

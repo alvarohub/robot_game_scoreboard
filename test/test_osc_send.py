@@ -15,7 +15,7 @@ from pythonosc import udp_client
 
 
 def main():
-    ip   = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.42"
+    ip   = sys.argv[1] if len(sys.argv) > 1 else "10.50.166.154" #"192.168.1.42"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
 
     client = udp_client.SimpleUDPClient(ip, port)
@@ -25,7 +25,8 @@ def main():
     print("Setting scores on all displays …")
     scores = ["1234", "5678", "90", "42", "HI", "GO!"]
     for i, score in enumerate(scores, start=1):
-        client.send_message(f"/display/{i}", score)
+        #client.send_message(f"/display/{i}", score)
+        client.send_message(f"/display/1", score)
         print(f"  /display/{i} ← \"{score}\"")
         time.sleep(0.3)
 

@@ -17,8 +17,8 @@
   #include <M5Unified.h>
 #endif
 
-DisplayManager display;
-OSCHandler     osc(display);
+DisplayManager displayManager;
+OSCHandler     osc(displayManager);
 bool           networkUp = false;
 
 // ── Helper: show a status line on the AtomS3 built-in LCD ────
@@ -33,6 +33,7 @@ static void lcdStatus(const char* line1, const char* line2 = nullptr,
                           line2 ? M5.Display.height() / 2 - 14
                                 : M5.Display.height() / 2);
     if (line2) {
+        M5.Display.setTextSize(1);   
         M5.Display.drawString(line2, M5.Display.width() / 2,
                               M5.Display.height() / 2 + 14);
     }
@@ -63,10 +64,16 @@ void setup() {
                   NUM_DISPLAYS, MATRIX_TILE_WIDTH, MATRIX_TILE_HEIGHT);
     Serial.printf("  OSC port     : %d\n", OSC_PORT);
 
+#ifdef USE_RS485
+    Serial2.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
+    Serial.printf("  RS485        : RX=GPIO%d  TX=GPIO%d  %d baud\n",
+                  RS485_RX_PIN, RS485_TX_PIN, RS485_BAUD);
+#endif
+
     // Initialise LED matrices and run a quick self-test
-    display.begin();
-    display.showTestPattern();
-    display.startDisplay();
+    displayManager.begin();
+    displayManager.showTestPattern();
+    displayManager.startDisplay();
 
     // ── WiFi prompt: press button to connect, or wait to skip ──
 
@@ -128,8 +135,8 @@ void setup() {
     }
 #endif
 
-    display.clearAll();
-    display.update();
+    displayManager.clearAll();
+    displayManager.update();
     Serial.println(networkUp
         ? "Ready — waiting for OSC messages + serial commands …"
         : "Ready — serial-only mode (no network) …");
@@ -144,11 +151,14 @@ void loop() {
 #if SERIAL_CMD_ENABLED
     osc.processSerial(); // read & dispatch serial text commands
 #endif
-    display.update();    // push pixel changes to the strip (no-op when idle)
+#ifdef USE_RS485
+    osc.processRS485();  // read & dispatch RS485 text commands
+#endif
+    displayManager.update();    // push pixel changes to the strip (no-op when idle)
 
     // Notify over serial when a scroll animation finishes
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
-        if (display.scrollFinished(i)) {
+        if (displayManager.scrollFinished(i)) {
             Serial.printf("SCROLL_DONE %d\n", i + 1);   // 1-based
         }
     }

@@ -15,6 +15,7 @@ import time
 import colorsys
 import serial
 import serial.tools.list_ports
+import math
 
 
 def find_serial_port():
@@ -35,6 +36,23 @@ def send(ser, cmd):
     ser.write(line.encode("utf-8"))
     print(f"  → {cmd}")
     time.sleep(0.15)
+
+def raster_scan(ser, delay_ms=30):
+    """Send the /rasterscan command to light each LED in sequence."""
+    send(ser, f"/rasterscan {delay_ms}")
+    # Wait for the scan to finish — it prints "RASTER_SCAN_DONE" when done
+    t0 = time.time()
+    while time.time() - t0 < 10:  # timeout after 10 seconds
+        if ser.in_waiting:
+            line = ser.readline().decode("utf-8", errors="replace").rstrip()
+            print(f"  [fw] {line}")
+            if "RASTER_SCAN_DONE" in line:
+                print("Raster scan complete!")
+                return True
+        else:
+            time.sleep(0.01)
+    print("⚠ timeout waiting for raster scan to complete")
+    return False    
 
 
 def wait_scroll_done(ser, display_num=1, timeout_sec=2.0):
@@ -92,6 +110,12 @@ def main():
     # if not wait_for_ready(ser, timeout_sec=5):
     #     print("No 'Ready' seen (board may already be running). Proceeding …")
 
+    #Start with a raster scan test to verify basic communication and LED control.
+    print("\n── Raster scan test ──")
+    if not raster_scan(ser, delay_ms=20):
+        print("Raster scan failed or timed out. Continuing anyway …")     
+
+
     print("\n── Setting scores ──")
     send(ser, '/display/1/text "HELLO"')
     time.sleep(1)
@@ -107,28 +131,29 @@ def main():
     # send(ser, "/display/6/color 0 255 0")
     # time.sleep(2)
 
-    print("\n── Brightness breathe ──")
-    import math
-    steps_per_cycle = 40        # 40 steps × 25 ms = 1 s per cycle
-    for cycle in range(4):
-        for s in range(steps_per_cycle):
-            # sine wave 0→1→0 over one cycle
-            b = int(5 + 75 * (0.5 - 0.5 * math.cos(2 * math.pi * s / steps_per_cycle)))
-            send(ser, f"/brightness {b}")
-            time.sleep(0.5 / steps_per_cycle)
 
     print("\n── Scroll mode test ──")
     send(ser, "/display/1/scroll 1") # set scroll mode up
-    send(ser, "/display/1 999")
+    send(ser, "/display/1 abcd")
     wait_scroll_done(ser, 1)
-    send(ser, "/display/1 888")
+    send(ser, "/display/1 1234")
     wait_scroll_done(ser, 1)
     
     send(ser, "/display/1/scroll 2") # set scroll mode down
-    send(ser, "/display/1 999")
+    send(ser, "/display/1 Hello")
     wait_scroll_done(ser, 1)
-    send(ser, "/display/1 888")
+    send(ser, "/display/1 You")
     wait_scroll_done(ser, 1)
+
+    # print("\n── Brightness breathe ──")
+    # steps_per_cycle = 40        # 40 steps × 25 ms = 1 s per cycle
+    # for cycle in range(4):
+    #     for s in range(steps_per_cycle):
+    #         # sine wave 0→1→0 over one cycle
+    #         b = int(5 + 75 * (0.5 - 0.5 * math.cos(2 * math.pi * s / steps_per_cycle)))
+    #         send(ser, f"/brightness {b}")
+    #         time.sleep(0.5 / steps_per_cycle)
+
 
     # Fire-and-forget: send many values quickly — the queue buffers them
     # and they scroll one-by-one automatically.

@@ -30,7 +30,7 @@
 
 // Brightness 0-255.  Keep LOW during development to limit current draw!
 // 6 panels × 256 LEDs = 1536 LEDs.  Text at brightness 20 → ~1–2 A.
-#define DEFAULT_BRIGHTNESS 20
+#define DEFAULT_BRIGHTNESS 10
 
 // ── NeoMatrix layout flags ───────────────────────────────────
 // Adjust to match your physical panel wiring.
@@ -49,11 +49,27 @@
 //    NEO_TILE_PROGRESSIVE / ZIGZAG
 
 #define MATRIX_LAYOUT ( \
-  NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_COLUMNS + NEO_MATRIX_PROGRESSIVE + \
+  NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_PROGRESSIVE + \
   NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_ROWS      + NEO_TILE_PROGRESSIVE     \
 )
 
+// #define MATRIX_LAYOUT ( \
+//   NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_COLUMNS + NEO_MATRIX_PROGRESSIVE + \
+//   NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_COLUMNS     + NEO_TILE_PROGRESSIVE     \
+// )
+
+
 #define LED_TYPE (NEO_GRB + NEO_KHZ800)
+
+// ── Dead-LED compensation ────────────────────────────────────
+// If a physical LED in the strip is dead (bypassed with a jumper),
+// set DEAD_LED_INDEX to its raw strip index (0-based).  The renderer
+// simply skips that pixel's content — it can't be displayed anyway.
+// Every other physical LED shows its correct pixel.
+// Set to -1 to disable (no dead LEDs).
+#ifndef DEAD_LED_INDEX
+  #define DEAD_LED_INDEX 172
+#endif
 
 // ── Serial command interface ─────────────────────────────────
 // Enable text-based commands over USB-Serial (same syntax as OSC addresses).
@@ -76,5 +92,21 @@
   #endif
   #ifndef ETH_RST_PIN
     #define ETH_RST_PIN 7
+  #endif
+#endif
+
+// ── RS485 (Atomic RS485 Base — SP3485EE) ─────────────────────
+// Uses Serial2 via the Atom bottom-pad connector.
+// Direction control is automatic (hardware-managed on the base).
+// Default pins match AtomS3 / AtomS3R + Atomic RS485 Base wiring.
+#ifdef USE_RS485
+  #ifndef RS485_RX_PIN
+    #define RS485_RX_PIN 5
+  #endif
+  #ifndef RS485_TX_PIN
+    #define RS485_TX_PIN 6
+  #endif
+  #ifndef RS485_BAUD
+    #define RS485_BAUD 115200
   #endif
 #endif
