@@ -41,7 +41,17 @@ public:
     void setScrollMode(uint8_t displayIndex, uint8_t mode);
     void setScrollModeAll(uint8_t mode);
     void setScrollSpeed(uint8_t ms);
-    void setScrollBlank(bool enabled);
+    void setScrollContinuous(bool enabled);
+    void setParticlesEnabled(bool enabled);
+    void setParticlesEnabled(uint8_t displayIndex, bool enabled);
+    void setTextEnabled(bool enabled);
+    void setTextEnabled(uint8_t displayIndex, bool enabled);
+    void setTextBrightness(uint8_t brightness);
+    void setTextBrightness(uint8_t displayIndex, uint8_t brightness);
+    void setParticleBrightness(uint8_t brightness);
+    void setParticleBrightness(uint8_t displayIndex, uint8_t brightness);
+    void setParticleColor(uint8_t r, uint8_t g, uint8_t b);
+    void setParticleColor(uint8_t displayIndex, uint8_t r, uint8_t g, uint8_t b);
     void setGravity(float gx, float gy);
     void setParticleConfig(const ParticleModeConfig& cfg);
     void setParticleConfig(uint8_t displayIndex, const ParticleModeConfig& cfg);

@@ -96,31 +96,59 @@ class ScoreboardGUI:
             row=0, column=1, sticky="w", **pad
         )
 
-        # ── Mode frame ───────────────────────────────────────
-        mode_f = ttk.LabelFrame(self.root, text="Mode")
+        # ── Layers & Mode frame ──────────────────────────────
+        mode_f = ttk.LabelFrame(self.root, text="Layers & Mode")
         mode_f.pack(fill="x", **pad)
 
+        # Row 0: Text layer enable + text mode selection
+        self._text_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode_f, text="Text", variable=self._text_enabled,
+                        command=self._on_text_toggle).grid(row=0, column=0, **pad)
+
         self._mode_var = tk.StringVar(value="text")
-        modes = [("Text", "text"), ("Scroll ↑", "scroll_up"),
-                 ("Scroll ↓", "scroll_down"), ("Particles", "particles")]
+        modes = [("Immediate", "text"), ("Scroll ↑", "scroll_up"),
+                 ("Scroll ↓", "scroll_down")]
         for i, (label, val) in enumerate(modes):
             ttk.Radiobutton(mode_f, text=label, variable=self._mode_var,
                             value=val, command=self._on_mode_change).grid(
-                row=0, column=i, **pad
+                row=0, column=1 + i, **pad
             )
 
-        # ── Text frame ───────────────────────────────────────
-        text_f = ttk.LabelFrame(self.root, text="Text / Score")
+        # Row 1: per-layer brightness
+        ttk.Label(mode_f, text="Text bright:").grid(row=1, column=0, **pad)
+        self._text_brightness_var = tk.IntVar(value=255)
+        ttk.Scale(mode_f, from_=0, to=255, variable=self._text_brightness_var,
+                  orient="horizontal", length=140,
+                  command=lambda *_: self._on_text_brightness()).grid(row=1, column=1, columnspan=2, **pad)
+        self._text_bright_label = ttk.Label(mode_f, text="255")
+        self._text_bright_label.grid(row=1, column=3, **pad)
+
+        # ── Text / Stack frame ─────────────────────────────────
+        text_f = ttk.LabelFrame(self.root, text="Text / Stack")
         text_f.pack(fill="x", **pad)
 
         self._text_var = tk.StringVar()
-        text_entry = ttk.Entry(text_f, textvariable=self._text_var, width=20)
+        text_entry = ttk.Entry(text_f, textvariable=self._text_var, width=16)
         text_entry.grid(row=0, column=0, **pad)
         text_entry.bind("<Return>", lambda e: self._send_text())
         ttk.Button(text_f, text="Send", command=self._send_text).grid(row=0, column=1, **pad)
+        ttk.Button(text_f, text="Push", command=self._ts_push).grid(row=0, column=2, **pad)
+        ttk.Button(text_f, text="Pop", command=self._ts_pop).grid(row=0, column=3, **pad)
+        ttk.Button(text_f, text="Clear stk", command=self._ts_clear).grid(row=0, column=4, **pad)
 
-        # ── Colour frame ─────────────────────────────────────
-        color_f = ttk.LabelFrame(self.root, text="Colour")
+        self._scrollcont_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(text_f, text="Continuous", variable=self._scrollcont_var,
+                        command=self._on_scrollcontinuous).grid(row=0, column=5, **pad)
+
+        # Row 1: compact horizontal stack display
+        ttk.Label(text_f, text="Stack:").grid(row=1, column=0, sticky="w", **pad)
+        self._ts_listbox = tk.Listbox(text_f, height=2, width=50, font=("Menlo", 9))
+        self._ts_listbox.grid(row=1, column=1, columnspan=4, sticky="ew", **pad)
+        ttk.Button(text_f, text="Update", command=self._ts_update_selected).grid(row=1, column=5, **pad)
+        text_f.columnconfigure(1, weight=1)
+
+        # ── Text colour frame ─────────────────────────────────
+        color_f = ttk.LabelFrame(self.root, text="Text Colour")
         color_f.pack(fill="x", **pad)
 
         self._color_preview = tk.Canvas(color_f, width=30, height=30,
@@ -168,117 +196,144 @@ class ScoreboardGUI:
         self._scrollspeed_label = ttk.Label(scroll_f, text="50")
         self._scrollspeed_label.grid(row=0, column=2, **pad)
 
-        self._scrollblank_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(scroll_f, text="Blank between", variable=self._scrollblank_var,
-                        command=self._on_scrollblank).grid(row=0, column=3, **pad)
-
         # ── Particle settings frame ──────────────────────────
         part_f = ttk.LabelFrame(self.root, text="Particle Settings")
         part_f.pack(fill="x", **pad)
 
-        # Row 0: count + render interval + physics substep
-        ttk.Label(part_f, text="Count:").grid(row=0, column=0, **pad)
+        # Enable checkbox (particles as overlay, independent of text mode)
+        self._particles_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Enable Particles",
+                        variable=self._particles_enabled,
+                        command=self._on_particles_toggle).grid(
+            row=0, column=0, sticky="w", **pad
+        )
+
+        self._pspeedcolor_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Speed Color",
+                        variable=self._pspeedcolor_var,
+                        command=self._send_particle_config).grid(
+            row=0, column=1, sticky="w", **pad
+        )
+
+        # Particle colour (independent from text colour)
+        self._pcolor = (100, 100, 255)  # default: bluish
+        self._pcolor_preview = tk.Canvas(part_f, width=20, height=20,
+                                         bg=self._pcolor_hex(), highlightthickness=1)
+        self._pcolor_preview.grid(row=0, column=2, **pad)
+        ttk.Button(part_f, text="Color…", command=self._pick_particle_color).grid(
+            row=0, column=3, **pad
+        )
+
+        # Particle brightness
+        ttk.Label(part_f, text="Bright:").grid(row=0, column=4, **pad)
+        self._particle_brightness_var = tk.IntVar(value=255)
+        ttk.Scale(part_f, from_=0, to=255, variable=self._particle_brightness_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._on_particle_brightness()).grid(row=0, column=5, **pad)
+
+        # Row 1: count + render interval + physics substep
+        ttk.Label(part_f, text="Count:").grid(row=1, column=0, **pad)
         self._pcount_var = tk.IntVar(value=6)
         ttk.Spinbox(part_f, from_=1, to=64, textvariable=self._pcount_var, width=4,
-                     command=self._send_particle_config).grid(row=0, column=1, sticky="w", **pad)
+                     command=self._send_particle_config).grid(row=1, column=1, sticky="w", **pad)
 
-        ttk.Label(part_f, text="Render (ms):").grid(row=0, column=2, **pad)
+        ttk.Label(part_f, text="Render (ms):").grid(row=1, column=2, **pad)
         self._prenderms_var = tk.IntVar(value=20)
         ttk.Spinbox(part_f, from_=5, to=100, textvariable=self._prenderms_var, width=4,
-                     command=self._send_particle_config).grid(row=0, column=3, sticky="w", **pad)
+                     command=self._send_particle_config).grid(row=1, column=3, sticky="w", **pad)
 
-        ttk.Label(part_f, text="Substep (ms):").grid(row=0, column=4, **pad)
+        ttk.Label(part_f, text="Substep (ms):").grid(row=1, column=4, **pad)
         self._psubstep_var = tk.IntVar(value=20)
         ttk.Spinbox(part_f, from_=5, to=50, textvariable=self._psubstep_var, width=4,
-                     command=self._send_particle_config).grid(row=0, column=5, sticky="w", **pad)
+                     command=self._send_particle_config).grid(row=1, column=5, sticky="w", **pad)
 
-        # Row 1: gravity scale + gravity enable
+        # Row 2: gravity scale + gravity enable
         self._pgrav_enabled = tk.BooleanVar(value=True)
         ttk.Checkbutton(part_f, text="Gravity:", variable=self._pgrav_enabled,
-                        command=self._send_particle_config).grid(row=1, column=0, **pad)
+                        command=self._send_particle_config).grid(row=2, column=0, **pad)
         self._pgrav_var = tk.DoubleVar(value=18.0)
         self._pgrav_scale = ttk.Scale(part_f, from_=0, to=60, variable=self._pgrav_var,
                                       orient="horizontal", length=180,
                                       command=lambda *_: self._send_particle_config())
-        self._pgrav_scale.grid(row=1, column=1, columnspan=2, **pad)
+        self._pgrav_scale.grid(row=2, column=1, columnspan=2, **pad)
         self._pgrav_label = ttk.Label(part_f, text="18.0")
-        self._pgrav_label.grid(row=1, column=3, **pad)
+        self._pgrav_label.grid(row=2, column=3, **pad)
 
-        # Row 2: restitution (particle-particle) + wall restitution
-        ttk.Label(part_f, text="Restit (p-p):").grid(row=2, column=0, **pad)
+        # Row 3: restitution (particle-particle) + wall restitution
+        ttk.Label(part_f, text="Restit (p-p):").grid(row=3, column=0, **pad)
         self._pelast_var = tk.DoubleVar(value=0.92)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pelast_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=2, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=3, column=1, **pad)
 
-        ttk.Label(part_f, text="Restit (wall):").grid(row=2, column=2, **pad)
+        ttk.Label(part_f, text="Restit (wall):").grid(row=3, column=2, **pad)
         self._pwelast_var = tk.DoubleVar(value=0.78)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pwelast_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=2, column=3, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=3, column=3, **pad)
 
-        # Row 2 cont: damping (per-substep velocity multiplier, 1=none)
-        ttk.Label(part_f, text="Damping:").grid(row=2, column=4, **pad)
+        # Row 3 cont: damping (per-substep velocity multiplier, 1=none)
+        ttk.Label(part_f, text="Damping:").grid(row=3, column=4, **pad)
         self._pdamping_var = tk.DoubleVar(value=0.9998)
         ttk.Spinbox(part_f, from_=0.99, to=1.0, increment=0.0001,
                     textvariable=self._pdamping_var, width=7, format="%.4f",
-                    command=self._send_particle_config).grid(row=2, column=5, sticky="w", **pad)
+                    command=self._send_particle_config).grid(row=3, column=5, sticky="w", **pad)
 
-        # Row 3: radius + render style
-        ttk.Label(part_f, text="Radius:").grid(row=3, column=0, **pad)
+        # Row 4: radius + render style
+        ttk.Label(part_f, text="Radius:").grid(row=4, column=0, **pad)
         self._pradius_var = tk.DoubleVar(value=0.45)
         ttk.Scale(part_f, from_=0.1, to=2.0, variable=self._pradius_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=3, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=4, column=1, **pad)
         self._pradius_label = ttk.Label(part_f, text="0.45")
-        self._pradius_label.grid(row=3, column=2, **pad)
+        self._pradius_label.grid(row=4, column=2, **pad)
 
         self._prender_var = tk.IntVar(value=4)  # 0=point,1=square,2=circle,3=text,4=glow
         style_f = ttk.Frame(part_f)
-        style_f.grid(row=3, column=3, columnspan=3, sticky="w", **pad)
+        style_f.grid(row=4, column=3, columnspan=3, sticky="w", **pad)
         for label, val in [("Point", 0), ("Square", 1), ("Circle", 2), ("Text", 3), ("Glow", 4)]:
             ttk.Radiobutton(style_f, text=label, variable=self._prender_var,
                             value=val, command=self._send_particle_config).pack(side="left", padx=2)
 
-        # Row 4: glow sigma + wavelength (interference)
-        ttk.Label(part_f, text="Glow σ:").grid(row=4, column=0, **pad)
+        # Row 5: glow sigma + wavelength (interference)
+        ttk.Label(part_f, text="Glow σ:").grid(row=5, column=0, **pad)
         self._psigma_var = tk.DoubleVar(value=1.2)
         ttk.Scale(part_f, from_=0.2, to=4.0, variable=self._psigma_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_particle_config()).grid(row=4, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=5, column=1, **pad)
         self._psigma_label = ttk.Label(part_f, text="1.2")
-        self._psigma_label.grid(row=4, column=2, **pad)
+        self._psigma_label.grid(row=5, column=2, **pad)
 
-        ttk.Label(part_f, text="λ (wave):").grid(row=4, column=3, **pad)
+        ttk.Label(part_f, text="λ (wave):").grid(row=5, column=3, **pad)
         self._pwavelength_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=8.0, variable=self._pwavelength_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_particle_config()).grid(row=4, column=4, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=5, column=4, **pad)
         self._pwavelength_label = ttk.Label(part_f, text="0.0")
-        self._pwavelength_label.grid(row=4, column=5, **pad)
-        # Row 5: temperature (Langevin jitter)
-        ttk.Label(part_f, text="Temp:").grid(row=5, column=0, **pad)
+        self._pwavelength_label.grid(row=5, column=5, **pad)
+        # Row 6: temperature (Langevin jitter)
+        ttk.Label(part_f, text="Temp:").grid(row=6, column=0, **pad)
         self._ptemp_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=2.0, variable=self._ptemp_var,
                   orient="horizontal", length=180,
-                  command=lambda *_: self._send_particle_config()).grid(row=5, column=1, columnspan=2, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=6, column=1, columnspan=2, **pad)
         self._ptemp_label = ttk.Label(part_f, text="0.0")
-        self._ptemp_label.grid(row=5, column=3, **pad)
+        self._ptemp_label.grid(row=6, column=3, **pad)
 
-        # Row 6: attraction strength + range
-        ttk.Label(part_f, text="Attract:").grid(row=6, column=0, **pad)
+        # Row 7: attraction strength + range
+        ttk.Label(part_f, text="Attract:").grid(row=7, column=0, **pad)
         self._pattract_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pattract_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=6, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=7, column=1, **pad)
         self._pattract_label = ttk.Label(part_f, text="0.00")
-        self._pattract_label.grid(row=6, column=2, **pad)
+        self._pattract_label.grid(row=7, column=2, **pad)
 
-        ttk.Label(part_f, text="Range (×d):").grid(row=6, column=3, **pad)
+        ttk.Label(part_f, text="Range (×d):").grid(row=7, column=3, **pad)
         self._pattrange_var = tk.DoubleVar(value=3.0)
         ttk.Scale(part_f, from_=1.5, to=8.0, variable=self._pattrange_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=6, column=4, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=7, column=4, **pad)
         # ── Actions frame ────────────────────────────────────
         act_f = ttk.LabelFrame(self.root, text="Actions")
         act_f.pack(fill="x", **pad)
@@ -291,6 +346,9 @@ class ScoreboardGUI:
         )
         ttk.Button(act_f, text="Raster Scan", command=self._raster_scan).grid(
             row=0, column=2, **pad
+        )
+        ttk.Button(act_f, text="Defaults", command=self._reset_defaults).grid(
+            row=0, column=3, **pad
         )
 
         # ── Presets frame (JSON save/load + ESP32 NVS) ────────
@@ -408,10 +466,41 @@ class ScoreboardGUI:
     def _on_mode_change(self):
         self._send(f"{self._disp_prefix()}/mode {self._mode_var.get()}")
 
+    def _on_text_toggle(self):
+        en = 1 if self._text_enabled.get() else 0
+        self._send(f"{self._disp_prefix()}/text/enable {en}")
+
+    def _on_particles_toggle(self):
+        en = 1 if self._particles_enabled.get() else 0
+        self._send(f"{self._disp_prefix()}/particles/enable {en}")
+
+    def _on_text_brightness(self):
+        val = self._text_brightness_var.get()
+        self._text_bright_label.config(text=str(val))
+        self._send(f"{self._disp_prefix()}/text/brightness {val}")
+
+    def _on_particle_brightness(self):
+        val = self._particle_brightness_var.get()
+        self._send(f"{self._disp_prefix()}/particles/brightness {val}")
+
+    def _pcolor_hex(self):
+        return f"#{self._pcolor[0]:02x}{self._pcolor[1]:02x}{self._pcolor[2]:02x}"
+
+    def _pick_particle_color(self):
+        result = colorchooser.askcolor(initialcolor=self._pcolor_hex())
+        if result and result[0]:
+            r, g, b = (int(c) for c in result[0])
+            self._pcolor = (r, g, b)
+            self._pcolor_preview.config(bg=self._pcolor_hex())
+            self._send(f"{self._disp_prefix()}/particles/color {r} {g} {b}")
+
     def _send_text(self):
         text = self._text_var.get()
         if text:
             self._send(f'{self._disp_prefix()} "{text}"')
+            # Also add to the GUI stack display (firmware pushes automatically)
+            self._ts_listbox.insert("end", text)
+            self._text_var.set("")
 
     def _pick_color(self):
         result = colorchooser.askcolor(initialcolor=self._color_hex())
@@ -444,8 +533,8 @@ class ScoreboardGUI:
         self._scrollspeed_label.config(text=str(val))
         self._send(f"/scrollspeed {val}")
 
-    def _on_scrollblank(self):
-        self._send(f"/scrollblank {1 if self._scrollblank_var.get() else 0}")
+    def _on_scrollcontinuous(self):
+        self._send(f"/scrollcontinuous {1 if self._scrollcont_var.get() else 0}")
 
     def _send_particle_config(self):
         """Debounced: coalesces rapid slider drags into one send."""
@@ -479,10 +568,12 @@ class ScoreboardGUI:
         substep = self._psubstep_var.get()
         damping = self._pdamping_var.get()
         wavelength = self._pwavelength_var.get()
+        speedcol = 1 if self._pspeedcolor_var.get() else 0
         self._send(
             f"{self._disp_prefix()}/particles {count} {renderms} {grav:.2f} {elast:.2f} {welast:.2f}"
             f" {radius:.2f} {render} {sigma:.2f} {temp:.2f}"
             f" {attract:.2f} {att_range:.2f} {grav_en} {substep} {damping:.4f} {wavelength:.2f}"
+            f" {speedcol}"
         )
 
     def _clear_display(self):
@@ -494,38 +585,92 @@ class ScoreboardGUI:
     def _raster_scan(self):
         self._send("/rasterscan 20")
 
+    def _reset_defaults(self):
+        self._send("/defaults")
+        self._log_msg("Sent /defaults — all params reset")
+
+    # ── Text stack UI handlers ────────────────────────────────
+
+    def _ts_push(self):
+        text = self._text_var.get().strip()
+        if not text:
+            return
+        self._ts_listbox.insert("end", text)
+        self._send(f'{self._disp_prefix()}/text/push "{text}"')
+        self._text_var.set("")
+
+    def _ts_pop(self):
+        if self._ts_listbox.size() == 0:
+            return
+        self._ts_listbox.delete("end")
+        self._send(f"{self._disp_prefix()}/text/pop")
+
+    def _ts_update_selected(self):
+        sel = self._ts_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        text = self._text_var.get().strip()
+        if not text:
+            return
+        self._ts_listbox.delete(idx)
+        self._ts_listbox.insert(idx, text)
+        self._send(f'{self._disp_prefix()}/text/set {idx} "{text}"')
+
+    def _ts_clear(self):
+        self._ts_listbox.delete(0, "end")
+        self._send(f"{self._disp_prefix()}/text/clear")
+
     # ── Presets (JSON) ────────────────────────────────────────
 
     def _gather_params(self):
-        """Return all GUI parameters as a plain dict."""
+        """Return all GUI parameters as a structured dict (new schema)."""
         return {
             "display": self._display_var.get(),
             "brightness": self._brightness_var.get(),
             "color": list(self._color),
-            "mode": self._mode_var.get(),
-            "scrollspeed": self._scrollspeed_var.get(),
-            "scrollblank": self._scrollblank_var.get(),
-            "particles": {
-                "count": self._pcount_var.get(),
-                "renderMs": self._prenderms_var.get(),
-                "substepMs": self._psubstep_var.get(),
-                "gravityScale": self._pgrav_var.get(),
-                "gravityEnabled": self._pgrav_enabled.get(),
-                "elasticity": self._pelast_var.get(),
-                "wallElasticity": self._pwelast_var.get(),
-                "damping": self._pdamping_var.get(),
-                "radius": self._pradius_var.get(),
-                "renderStyle": self._prender_var.get(),
-                "glowSigma": self._psigma_var.get(),
-                "temperature": self._ptemp_var.get(),
-                "attractStrength": self._pattract_var.get(),
-                "attractRange": self._pattrange_var.get(),
-                "glowWavelength": self._pwavelength_var.get(),
+            "activeMode": self._mode_var.get(),
+            "textEnabled": self._text_enabled.get(),
+            "textBrightness": self._text_brightness_var.get(),
+            "particlesEnabled": self._particles_enabled.get(),
+            "particleBrightness": self._particle_brightness_var.get(),
+            "particleColor": list(self._pcolor),
+            "textStack": list(self._ts_listbox.get(0, "end")),
+            "modes": {
+                "text": {
+                    "textIndex": 0,
+                },
+                "scroll_up": {
+                    "scrollStepMs": self._scrollspeed_var.get(),
+                    "continuous": self._scrollcont_var.get(),
+                },
+                "scroll_down": {
+                    "scrollStepMs": self._scrollspeed_var.get(),
+                    "continuous": self._scrollcont_var.get(),
+                },
+                "particles": {
+                    "count": self._pcount_var.get(),
+                    "renderMs": self._prenderms_var.get(),
+                    "substepMs": self._psubstep_var.get(),
+                    "gravityScale": self._pgrav_var.get(),
+                    "gravityEnabled": self._pgrav_enabled.get(),
+                    "elasticity": self._pelast_var.get(),
+                    "wallElasticity": self._pwelast_var.get(),
+                    "damping": self._pdamping_var.get(),
+                    "radius": self._pradius_var.get(),
+                    "renderStyle": self._prender_var.get(),
+                    "glowSigma": self._psigma_var.get(),
+                    "temperature": self._ptemp_var.get(),
+                    "attractStrength": self._pattract_var.get(),
+                    "attractRange": self._pattrange_var.get(),
+                    "glowWavelength": self._pwavelength_var.get(),
+                    "speedColor": self._pspeedcolor_var.get(),
+                },
             },
         }
 
     def _apply_params(self, d):
-        """Set GUI variables from a parameter dict (does NOT auto-send)."""
+        """Set GUI variables from a parameter dict (supports old and new schema)."""
         if "display" in d:
             self._display_var.set(d["display"])
         if "brightness" in d:
@@ -536,14 +681,57 @@ class ScoreboardGUI:
             self._r_var.set(r); self._g_var.set(g); self._b_var.set(b)
             self._color = (r, g, b)
             self._color_preview.config(bg=self._color_hex())
-        if "mode" in d:
-            self._mode_var.set(d["mode"])
-        if "scrollspeed" in d:
-            self._scrollspeed_var.set(d["scrollspeed"])
-            self._scrollspeed_label.config(text=str(d["scrollspeed"]))
-        if "scrollblank" in d:
-            self._scrollblank_var.set(d["scrollblank"])
-        p = d.get("particles", {})
+
+        # New schema: "activeMode" + "modes" block
+        if "activeMode" in d:
+            mode = d["activeMode"]
+            # Backwards compat: old "particles" mode → text + particlesEnabled
+            if mode == "particles":
+                self._mode_var.set("text")
+                self._particles_enabled.set(True)
+            else:
+                self._mode_var.set(mode)
+        elif "mode" in d:
+            self._mode_var.set(d["mode"])  # old schema compat
+        if "particlesEnabled" in d:
+            self._particles_enabled.set(d["particlesEnabled"])
+        if "textEnabled" in d:
+            self._text_enabled.set(d["textEnabled"])
+        if "textBrightness" in d:
+            self._text_brightness_var.set(d["textBrightness"])
+            self._text_bright_label.config(text=str(d["textBrightness"]))
+        if "particleBrightness" in d:
+            self._particle_brightness_var.set(d["particleBrightness"])
+        if "particleColor" in d and len(d["particleColor"]) == 3:
+            self._pcolor = tuple(d["particleColor"])
+            self._pcolor_preview.config(bg=self._pcolor_hex())
+
+        # Text stack
+        if "textStack" in d:
+            self._ts_listbox.delete(0, "end")
+            for item in d["textStack"]:
+                self._ts_listbox.insert("end", item)
+
+        # New schema: per-mode params
+        modes = d.get("modes", {})
+        if modes:
+            # Scroll settings (shared between scroll_up/scroll_down)
+            scroll = modes.get("scroll_up", modes.get("scroll_down", {}))
+            if "scrollStepMs" in scroll:
+                self._scrollspeed_var.set(scroll["scrollStepMs"])
+                self._scrollspeed_label.config(text=str(scroll["scrollStepMs"]))
+            if "continuous" in scroll:
+                self._scrollcont_var.set(scroll["continuous"])
+
+            # Particle settings
+            p = modes.get("particles", {})
+        else:
+            # Old schema compat: flat params
+            if "scrollspeed" in d:
+                self._scrollspeed_var.set(d["scrollspeed"])
+                self._scrollspeed_label.config(text=str(d["scrollspeed"]))
+            p = d.get("particles", {})
+
         if "count" in p: self._pcount_var.set(p["count"])
         if "renderMs" in p: self._prenderms_var.set(p["renderMs"])
         if "substepMs" in p: self._psubstep_var.set(p["substepMs"])
@@ -559,6 +747,7 @@ class ScoreboardGUI:
         if "attractStrength" in p: self._pattract_var.set(p["attractStrength"])
         if "attractRange" in p: self._pattrange_var.set(p["attractRange"])
         if "glowWavelength" in p: self._pwavelength_var.set(p["glowWavelength"])
+        if "speedColor" in p: self._pspeedcolor_var.set(p["speedColor"])
         # Refresh value labels
         self._pgrav_label.config(text=f"{self._pgrav_var.get():.1f}")
         self._pradius_label.config(text=f"{self._pradius_var.get():.2f}")
@@ -596,9 +785,21 @@ class ScoreboardGUI:
         self._on_brightness()
         self._on_color_slider()
         self._on_scrollspeed()
-        self._on_scrollblank()
+        self._on_scrollcontinuous()
         self._on_mode_change()
+        self._on_text_toggle()
+        self._on_particles_toggle()
+        self._on_text_brightness()
+        self._on_particle_brightness()
+        # Push particle colour
+        r, g, b = self._pcolor
+        self._send(f"{self._disp_prefix()}/particles/color {r} {g} {b}")
         self._send_particle_config()
+        # Push text stack to device
+        self._send(f"{self._disp_prefix()}/text/clear")
+        for i in range(self._ts_listbox.size()):
+            text = self._ts_listbox.get(i)
+            self._send(f'{self._disp_prefix()}/text/push "{text}"')
 
     # ── ESP32 NVS save / load ─────────────────────────────────
 
@@ -631,7 +832,7 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_default_port()
 
     root = tk.Tk()
-    root.geometry("720x1020")
+    root.geometry("720x960")
     app = ScoreboardGUI(root, initial_port=port)
 
     # Auto-connect if a port was found/specified

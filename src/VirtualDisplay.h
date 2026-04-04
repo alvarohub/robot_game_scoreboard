@@ -14,11 +14,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 #include <Adafruit_GFX.h>
+#include "config.h"
 #include "ParticleSystem.h"
-
-#ifndef SCROLL_STEP_MS
-  #define SCROLL_STEP_MS 50
-#endif
 
 #ifndef SCROLL_QUEUE_SIZE
   #define SCROLL_QUEUE_SIZE 10
@@ -28,7 +25,6 @@ enum DisplayMode : uint8_t {
     DISPLAY_MODE_TEXT = 0,
     DISPLAY_MODE_SCROLL_UP,
     DISPLAY_MODE_SCROLL_DOWN,
-    DISPLAY_MODE_PARTICLES,
 };
 
 struct ParticleModeConfig {
@@ -57,6 +53,9 @@ struct ParticleModeConfig {
     RenderStyle renderStyle = RENDER_GLOW;
     float       glowSigma      = 1.2f;   // Gaussian envelope sigma (pixels)
     float       glowWavelength = 0.0f;   // interference wavelength (0 = pure glow, >0 = wave)
+    bool        speedColor     = false;  // colour from velocity (heat-map)
+
+    uint8_t textIndex = 0;  // which textStack entry to use for RENDER_TEXT
 
     // Convert to ParticleSystemConfig
     ParticleSystemConfig toSystemConfig() const {
@@ -77,10 +76,24 @@ struct ParticleModeConfig {
     }
 };
 
-struct DisplayModeConfig {
-    DisplayMode mode = DISPLAY_MODE_TEXT;
+struct TextModeConfig {
+    uint8_t textIndex = 0;  // which textStack entry to display
+};
+
+struct ScrollModeConfig {
     uint8_t scrollStepMs = SCROLL_STEP_MS;
-    bool scrollBlank = false;
+    bool    continuous   = false;  // auto-cycle through textStack
+};
+
+struct DisplayModeConfig {
+    DisplayMode     mode = DISPLAY_MODE_TEXT;
+    bool            textEnabled      = true;   // text layer on/off
+    bool            particlesEnabled = false;  // particles layer on/off
+    uint8_t         textBrightness     = 255;  // 0-255 layer brightness
+    uint8_t         particleBrightness = 255;  // 0-255 layer brightness
+    uint16_t        particleColor = 0xFFFF;    // independent RGB565 colour for particles
+    TextModeConfig  text;
+    ScrollModeConfig scroll;
     ParticleModeConfig particles;
 };
 
@@ -97,17 +110,42 @@ public:
     uint16_t color() const { return _color; }
     void clear();
 
+    // ── Text stack ──────────────────────────────────────────────
+    /// Push a string onto the text stack. Returns index, or -1 if full.
+    int8_t textPush(const char* text);
+    /// Pop the last entry. Returns false if empty.
+    bool textPop();
+    /// Set entry at index (0-based). Returns false if out of range.
+    bool textSet(uint8_t index, const char* text);
+    /// Get entry at index. Returns "" if out of range.
+    const char* textGet(uint8_t index) const;
+    /// Clear the entire stack (count → 0).
+    void textClear();
+    /// Number of entries currently in the stack.
+    uint8_t textCount() const { return _textStackCount; }
+    /// Max entries (compile-time constant).
+    static constexpr uint8_t textMax() { return TEXT_STACK_MAX; }
+
     // ── Display mode ────────────────────────────────────────────
     void setMode(DisplayMode mode);
     void setMode(const DisplayModeConfig& config);
     DisplayMode mode() const { return _modeConfig.mode; }
     const DisplayModeConfig& modeConfig() const { return _modeConfig; }
+    void setTextEnabled(bool enabled);
+    bool textEnabled() const { return _modeConfig.textEnabled; }
+    void setParticlesEnabled(bool enabled);
+    bool particlesEnabled() const { return _modeConfig.particlesEnabled; }
+    void setTextBrightness(uint8_t b);
+    void setParticleBrightness(uint8_t b);
+    void setParticleColor(uint8_t r, uint8_t g, uint8_t b);
+    void setParticleColor(uint16_t c565);
+    uint16_t particleColor() const { return _modeConfig.particleColor; }
 
     // Compatibility wrappers for the previous scroll-only API.
     void    setScrollMode(uint8_t mode);
     uint8_t scrollMode() const { return (uint8_t)_modeConfig.mode; }
     void setScrollSpeed(uint8_t ms);
-    void setScrollBlank(bool enabled);
+    void setScrollContinuous(bool enabled);
     void setGravity(float gx, float gy);
     void setParticleConfig(const ParticleModeConfig& cfg);
 
@@ -120,21 +158,28 @@ public:
 
     // ── Query ───────────────────────────────────────────────────
     bool isAnimating() const {
-      return _scrollOffset > 0 || _modeConfig.mode == DISPLAY_MODE_PARTICLES;
+      return _scrollOffset > 0 || _modeConfig.particlesEnabled;
     }
+
+    // Apply layer brightness to an rgb565 pixel
+    static uint16_t dimColor565(uint16_t c, uint8_t brightness);
 
     /// Returns true (once) when a scroll animation finishes.
     bool scrollFinished();
 
     /// Expected scroll duration in ms (height × step time).
     unsigned long scrollDurationMs() const {
-      return (unsigned long)height() * _modeConfig.scrollStepMs;
+      return (unsigned long)height() * _modeConfig.scroll.scrollStepMs;
     }
 
 private:
-    // Text / display state
-    char     _text[32];
-    char     _oldText[32];
+    // Text stack (per-display, shared across modes)
+    char     _textStack[TEXT_STACK_MAX][TEXT_MAX_LEN];
+    uint8_t  _textStackCount;
+
+    // Active text for scroll animation (resolved from stack or pushed directly)
+    char     _text[TEXT_MAX_LEN];
+    char     _oldText[TEXT_MAX_LEN];
     uint16_t _color;
     bool     _dirty;
 
@@ -143,6 +188,7 @@ private:
     int8_t   _scrollOffset;
     unsigned long _scrollLastStep;
     bool     _scrollJustDone;
+    uint8_t  _continuousIdx;  // current textStack index for continuous scroll
 
     // Particle physics engine
     ParticleSystem _particleSys;
@@ -156,22 +202,28 @@ private:
     float _glowBuf[MAX_GLOW_PIXELS * 6];
 
     // Scroll queue (ring buffer)
-    char     _queue[SCROLL_QUEUE_SIZE][32];
+    char     _queue[SCROLL_QUEUE_SIZE][TEXT_MAX_LEN];
     uint8_t  _queueHead;
     uint8_t  _queueTail;
     uint8_t  _queueCount;
+
+    // Helper: get the text to display for the current mode
+    const char* _activeText() const;
 
     // Per-mode update handlers (called from update())
     bool        _updateText();
     bool        _updateScroll();
     bool        _updateParticles();
+    bool        _checkScrollEnd();
 
     // Rendering & animation helpers
-    void        _render();
-    void        _renderScrollFrame();
+    void        _render(bool clearFirst = true);
+    void        _renderScrollFrame(bool clearFirst = true);
     void        _renderParticlesShape();
     void        _renderParticlesGlow();
+    void        _redrawParticleLayer();
     void        _startScroll(const char* newText);
+    void        _startContinuousNext();
     void        _resetQueue();
     bool        _isScrollMode() const;
     const char* _fitTextRight(const char* text);

@@ -71,6 +71,21 @@
   #define DEAD_LED_INDEX 172
 #endif
 
+// ── Text stack ───────────────────────────────────────────────
+// Each VirtualDisplay owns a text stack (shared across modes).
+// TEXT_STACK_MAX = max entries, TEXT_MAX_LEN = max chars per entry.
+#ifndef TEXT_STACK_MAX
+  #define TEXT_STACK_MAX  8
+#endif
+#ifndef TEXT_MAX_LEN
+  #define TEXT_MAX_LEN   32
+#endif
+
+// ── Scroll step default ─────────────────────────────────────
+#ifndef SCROLL_STEP_MS
+  #define SCROLL_STEP_MS 50
+#endif
+
 // ── Serial command interface ─────────────────────────────────
 // Enable text-based commands over USB-Serial (same syntax as OSC addresses).
 // Disable with -DSERIAL_CMD_ENABLED=0 in build_flags if not needed.

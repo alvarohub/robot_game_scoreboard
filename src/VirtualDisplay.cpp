@@ -7,22 +7,56 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
+// ── Heat-map: velocity magnitude → RGB565 (dim white→blue→cyan→green→yellow→red) ─
+static uint16_t _heatColor(float speed, float maxSpeed) {
+    float t = speed / maxSpeed;
+    if (t > 1.0f) t = 1.0f;
+    // Floor: stationary particles show as dim white so they stay visible
+    const float floor = 0.12f;   // ~30/255 per channel
+    // 5-stop heat ramp mapped to 0..1
+    float r, g, b;
+    if (t < 0.2f)      { float s = t / 0.2f;       r = floor*(1-s);  g = floor*(1-s);  b = floor + (1-floor)*s; }  // dim white→blue
+    else if (t < 0.4f) { float s = (t-0.2f)/0.2f;  r = 0;    g = s;    b = 1;    }   // blue→cyan
+    else if (t < 0.6f) { float s = (t-0.4f)/0.2f;  r = 0;    g = 1;    b = 1-s;  }   // cyan→green
+    else if (t < 0.8f) { float s = (t-0.6f)/0.2f;  r = s;    g = 1;    b = 0;    }   // green→yellow
+    else               { float s = (t-0.8f)/0.2f;  r = 1;    g = 1-s;  b = 0;    }   // yellow→red
+    return rgb565((uint8_t)(r*255), (uint8_t)(g*255), (uint8_t)(b*255));
+}
+
+// Update all particle colours from their velocity magnitude
+static void _applySpeedColors(ParticleSystem& ps) {
+    uint8_t n = ps.count();
+    // Find max speed to normalise
+    float maxSpd = 0.001f; // avoid div-by-zero
+    for (uint8_t i = 0; i < n; i++) {
+        float spd = ps.particle(i).vel.length();
+        if (spd > maxSpd) maxSpd = spd;
+    }
+    for (uint8_t i = 0; i < n; i++) {
+        Particle& p = ps.particle(i);
+        p.color = _heatColor(p.vel.length(), maxSpd);
+    }
+}
+
 // ── Constructor ──────────────────────────────────────────────
 VirtualDisplay::VirtualDisplay(uint16_t w, uint16_t h)
     : GFXcanvas16(w, h),
+      _textStackCount(0),
       _color(0xFFFF),          // white in RGB565
       _dirty(true),
-    _modeConfig(),
+      _modeConfig(),
       _scrollOffset(0),
       _scrollLastStep(0),
       _scrollJustDone(false),
-    _lastParticleStep(0),
+      _continuousIdx(0),
+      _lastParticleStep(0),
       _queueHead(0),
       _queueTail(0),
       _queueCount(0)
 {
     _text[0]    = '\0';
     _oldText[0] = '\0';
+    memset(_textStack, 0, sizeof(_textStack));
     setTextWrap(false);
     setTextSize(1);
     fillScreen(0);
@@ -35,18 +69,15 @@ void VirtualDisplay::setText(const char* text) {
     // In static text mode, skip if text is identical (no visible change)
     if (strcmp(_text, text) == 0 && !_isScrollMode()) return;
 
-    if (_modeConfig.mode == DISPLAY_MODE_PARTICLES) {
-        strncpy(_text, text, sizeof(_text) - 1);
-        _text[sizeof(_text) - 1] = '\0';
-        return;
-    }
+    // Always push to the text stack
+    textPush(text);
 
     if (_isScrollMode()) {
         if (_scrollOffset > 0) {
             // Scroll in progress — queue if room
             if (_queueCount < SCROLL_QUEUE_SIZE) {
-                strncpy(_queue[_queueTail], text, 31);
-                _queue[_queueTail][31] = '\0';
+                strncpy(_queue[_queueTail], text, TEXT_MAX_LEN - 1);
+                _queue[_queueTail][TEXT_MAX_LEN - 1] = '\0';
                 _queueTail = (_queueTail + 1) % SCROLL_QUEUE_SIZE;
                 _queueCount++;
             }
@@ -54,6 +85,7 @@ void VirtualDisplay::setText(const char* text) {
         }
         _startScroll(text);
     } else {
+        // Immediate mode: show the text now
         strncpy(_text, text, sizeof(_text) - 1);
         _text[sizeof(_text) - 1] = '\0';
         _dirty = true;
@@ -66,13 +98,51 @@ void VirtualDisplay::setColor(uint8_t r, uint8_t g, uint8_t b) {
 
 void VirtualDisplay::setColor(uint16_t color565) {
     _color = color565;
-    // Propagate to live particles
-    if (_modeConfig.mode == DISPLAY_MODE_PARTICLES && _particleSys.isInitialised()) {
+    _dirty = true;
+}
+
+void VirtualDisplay::setParticleColor(uint8_t r, uint8_t g, uint8_t b) {
+    setParticleColor(rgb565(r, g, b));
+}
+
+void VirtualDisplay::setParticleColor(uint16_t c565) {
+    _modeConfig.particleColor = c565;
+    // Propagate to live particles (unless speedColor overrides)
+    if (_modeConfig.particlesEnabled && _particleSys.isInitialised()
+        && !_modeConfig.particles.speedColor) {
         for (uint8_t i = 0; i < _particleSys.count(); i++) {
-            _particleSys.particle(i).color = color565;
+            _particleSys.particle(i).color = c565;
         }
     }
     _dirty = true;
+}
+
+void VirtualDisplay::setTextEnabled(bool enabled) {
+    _modeConfig.textEnabled = enabled;
+    _dirty = true;
+}
+
+void VirtualDisplay::setTextBrightness(uint8_t b) {
+    _modeConfig.textBrightness = b;
+    _dirty = true;
+}
+
+void VirtualDisplay::setParticleBrightness(uint8_t b) {
+    _modeConfig.particleBrightness = b;
+    _dirty = true;
+}
+
+// Scale an RGB565 colour by brightness (0-255)
+uint16_t VirtualDisplay::dimColor565(uint16_t c, uint8_t brightness) {
+    if (brightness == 255) return c;
+    if (brightness == 0)   return 0;
+    uint8_t r = (c >> 8) & 0xF8;
+    uint8_t g = (c >> 3) & 0xFC;
+    uint8_t b = (c << 3) & 0xF8;
+    r = (uint8_t)(((uint16_t)r * brightness) >> 8);
+    g = (uint8_t)(((uint16_t)g * brightness) >> 8);
+    b = (uint8_t)(((uint16_t)b * brightness) >> 8);
+    return rgb565(r, g, b);
 }
 
 void VirtualDisplay::clear() {
@@ -80,12 +150,72 @@ void VirtualDisplay::clear() {
     _oldText[0] = '\0';
     _scrollOffset = 0;
     _scrollJustDone = false;
+    _continuousIdx = 0;
     _particleSys.reset();
     _lastParticleStep = 0;
     _resetQueue();
     _modeConfig.mode = DISPLAY_MODE_TEXT;
+    _modeConfig.particlesEnabled = false;
     fillScreen(0);
     _dirty = true;
+}
+
+// ── Text stack ───────────────────────────────────────────────
+int8_t VirtualDisplay::textPush(const char* text) {
+    if (_textStackCount >= TEXT_STACK_MAX) return -1;
+    strncpy(_textStack[_textStackCount], text ? text : "", TEXT_MAX_LEN - 1);
+    _textStack[_textStackCount][TEXT_MAX_LEN - 1] = '\0';
+    _dirty = true;
+    return _textStackCount++;
+}
+
+bool VirtualDisplay::textPop() {
+    if (_textStackCount == 0) return false;
+    _textStackCount--;
+    _textStack[_textStackCount][0] = '\0';
+    _dirty = true;
+    return true;
+}
+
+bool VirtualDisplay::textSet(uint8_t index, const char* text) {
+    if (index >= TEXT_STACK_MAX) return false;
+    strncpy(_textStack[index], text ? text : "", TEXT_MAX_LEN - 1);
+    _textStack[index][TEXT_MAX_LEN - 1] = '\0';
+    if (index >= _textStackCount) _textStackCount = index + 1;
+    _dirty = true;
+    return true;
+}
+
+const char* VirtualDisplay::textGet(uint8_t index) const {
+    if (index >= _textStackCount) return "";
+    return _textStack[index];
+}
+
+void VirtualDisplay::textClear() {
+    _textStackCount = 0;
+    memset(_textStack, 0, sizeof(_textStack));
+    _text[0] = '\0';
+    _oldText[0] = '\0';
+    _scrollOffset = 0;
+    _continuousIdx = 0;
+    _resetQueue();
+    fillScreen(0);
+    _dirty = true;
+}
+
+const char* VirtualDisplay::_activeText() const {
+    uint8_t idx = 0;
+    switch (_modeConfig.mode) {
+        case DISPLAY_MODE_TEXT:
+            // Immediate mode: show the last (most recent) stack entry
+            if (_textStackCount > 0) return _textStack[_textStackCount - 1];
+            return _text;
+        default:
+            // Scroll modes use _text directly (managed by scroll animation)
+            return _text;
+    }
+    if (idx < _textStackCount) return _textStack[idx];
+    return _text;
 }
 
 // ── Display mode ─────────────────────────────────────────────
@@ -98,8 +228,8 @@ void VirtualDisplay::setMode(DisplayMode mode) {
 void VirtualDisplay::setMode(const DisplayModeConfig& config) {
     _modeConfig = config;
 
-    if (_modeConfig.scrollStepMs == 0) {
-        _modeConfig.scrollStepMs = 1;
+    if (_modeConfig.scroll.scrollStepMs == 0) {
+        _modeConfig.scroll.scrollStepMs = 1;
     }
     if (_modeConfig.particles.renderMs == 0) {
         _modeConfig.particles.renderMs = 1;
@@ -110,28 +240,42 @@ void VirtualDisplay::setMode(const DisplayModeConfig& config) {
         if (_queueCount > 0) {
             uint8_t lastIdx = (_queueTail + SCROLL_QUEUE_SIZE - 1)
                               % SCROLL_QUEUE_SIZE;
-            strncpy(_text, _queue[lastIdx], 31);
-            _text[31] = '\0';
+            strncpy(_text, _queue[lastIdx], TEXT_MAX_LEN - 1);
+            _text[TEXT_MAX_LEN - 1] = '\0';
         }
         _resetQueue();
         _scrollOffset = 0;
         _oldText[0] = '\0';
+        // Resolve text from stack
+        const char* t = _activeText();
+        if (t != _text) {
+            strncpy(_text, t, sizeof(_text) - 1);
+            _text[sizeof(_text) - 1] = '\0';
+        }
         _dirty = true;
-        return;
+    } else {
+        // Scroll mode
+        _scrollOffset = 0;
+        _oldText[0] = '\0';
+        _resetQueue();
+
+        // For continuous scroll: kick off first scroll immediately
+        if (_isScrollMode() && _modeConfig.scroll.continuous && _textStackCount > 0) {
+            _continuousIdx = 0;
+            _startScroll(_textStack[0]);
+        }
+        _dirty = true;
     }
 
-    _scrollOffset = 0;
-    _oldText[0] = '\0';
-    _resetQueue();
-
-    if (_modeConfig.mode == DISPLAY_MODE_PARTICLES) {
+    // Init or reconfigure particles if enabled
+    if (_modeConfig.particlesEnabled) {
         _particleSys.setConfig(_modeConfig.particles.toSystemConfig());
-        _particleSys.reset();
-        _lastParticleStep = millis();
-        _lastParticleRender = _lastParticleStep;
+        if (!_particleSys.isInitialised()) {
+            _particleSys.reset();
+            _lastParticleStep = millis();
+            _lastParticleRender = _lastParticleStep;
+        }
     }
-
-    _dirty = true;
 }
 
 void VirtualDisplay::setScrollMode(uint8_t mode) {
@@ -140,11 +284,28 @@ void VirtualDisplay::setScrollMode(uint8_t mode) {
 }
 
 void VirtualDisplay::setScrollSpeed(uint8_t ms) {
-    _modeConfig.scrollStepMs = ms > 0 ? ms : 1;
+    _modeConfig.scroll.scrollStepMs = ms > 0 ? ms : 1;
 }
 
-void VirtualDisplay::setScrollBlank(bool enabled) {
-    _modeConfig.scrollBlank = enabled;
+void VirtualDisplay::setScrollContinuous(bool enabled) {
+    _modeConfig.scroll.continuous = enabled;
+    if (enabled && _isScrollMode() && _textStackCount > 0 && _scrollOffset == 0) {
+        _continuousIdx = 0;
+        _startScroll(_textStack[0]);
+    }
+}
+
+void VirtualDisplay::setParticlesEnabled(bool enabled) {
+    _modeConfig.particlesEnabled = enabled;
+    if (enabled) {
+        _particleSys.setConfig(_modeConfig.particles.toSystemConfig());
+        if (!_particleSys.isInitialised()) {
+            _particleSys.init((float)width(), (float)height(), _modeConfig.particleColor);
+        }
+        _lastParticleStep = millis();
+        _lastParticleRender = _lastParticleStep;
+    }
+    _dirty = true;
 }
 
 void VirtualDisplay::setGravity(float gx, float gy) {
@@ -164,19 +325,66 @@ void VirtualDisplay::clearQueue() {
 
 // ── Per-frame update (call from DisplayManager::update) ──────
 bool VirtualDisplay::update() {
-    switch (_modeConfig.mode) {
-        case DISPLAY_MODE_PARTICLES:
-            return _updateParticles();
+    bool changed = false;
+    bool particlesRedrawn = false;
 
-        case DISPLAY_MODE_SCROLL_UP:
-        case DISPLAY_MODE_SCROLL_DOWN:
-            if (_scrollOffset > 0) return _updateScroll();
-            return _updateText();   // not scrolling → simple redraw
-
-        case DISPLAY_MODE_TEXT:
-        default:
-            return _updateText();
+    // Step 1: Advance particle physics & check if render is due
+    if (_modeConfig.particlesEnabled) {
+        particlesRedrawn = _updateParticles();
+        changed = particlesRedrawn;
     }
+
+    bool particlesActive = _modeConfig.particlesEnabled && _particleSys.isInitialised();
+
+    // Step 2: Text layer
+    if (_modeConfig.textEnabled) {
+        if (particlesActive) {
+            // ── Compositing mode: rebuild full frame only when needed ──
+            bool scrollStep = false;
+            if (_isScrollMode() && _scrollOffset > 0) {
+                unsigned long now = millis();
+                scrollStep = (now - _scrollLastStep >= _modeConfig.scroll.scrollStepMs);
+            }
+
+            bool needComposite = particlesRedrawn || _dirty || scrollStep;
+            if (needComposite) {
+                // Ensure particle layer is freshly drawn (clears canvas)
+                if (!particlesRedrawn) _redrawParticleLayer();
+
+                // Overlay text on top (no clear)
+                if (_isScrollMode() && _scrollOffset > 0) {
+                    if (scrollStep) _scrollLastStep = millis();
+                    _renderScrollFrame(false);
+                    if (scrollStep) { _scrollOffset++; _checkScrollEnd(); }
+                } else {
+                    _render(false);
+                }
+                _dirty = false;
+                changed = true;
+            }
+        } else {
+            // ── Text-only mode (original behaviour) ──
+            switch (_modeConfig.mode) {
+                case DISPLAY_MODE_SCROLL_UP:
+                case DISPLAY_MODE_SCROLL_DOWN:
+                    if (_scrollOffset > 0)
+                        changed |= _updateScroll();
+                    else
+                        changed |= _updateText();
+                    break;
+                default:
+                    changed |= _updateText();
+                    break;
+            }
+        }
+    } else if (!changed && _dirty) {
+        // Neither layer active — clear screen once
+        fillScreen(0);
+        _dirty = false;
+        changed = true;
+    }
+
+    return changed;
 }
 
 // ── Query ────────────────────────────────────────────────────
@@ -194,38 +402,39 @@ bool VirtualDisplay::scrollFinished() {
 
 bool VirtualDisplay::_updateText() {
     if (!_dirty) return false;
-    _render();
+    _render(true);
     _dirty = false;
     return true;
 }
 
 bool VirtualDisplay::_updateScroll() {
     unsigned long now = millis();
-    if (now - _scrollLastStep < _modeConfig.scrollStepMs) return false;
+    if (now - _scrollLastStep < _modeConfig.scroll.scrollStepMs) return false;
 
     _scrollLastStep = now;
-    _renderScrollFrame();
+    _renderScrollFrame(true);
     _scrollOffset++;
+    return _checkScrollEnd();
+}
 
-    if (_scrollOffset > (int8_t)height()) {
+bool VirtualDisplay::_checkScrollEnd() {
+    int16_t totalSteps = (int16_t)height();
+
+    if (_scrollOffset > totalSteps) {
         _scrollOffset = 0;
         _oldText[0] = '\0';
         _scrollJustDone = true;
 
         if (_queueCount > 0) {
-            char next[32];
-            strncpy(next, _queue[_queueHead], 31);
-            next[31] = '\0';
+            char next[TEXT_MAX_LEN];
+            strncpy(next, _queue[_queueHead], TEXT_MAX_LEN - 1);
+            next[TEXT_MAX_LEN - 1] = '\0';
             _queueHead = (_queueHead + 1) % SCROLL_QUEUE_SIZE;
             _queueCount--;
-
-            if (_modeConfig.scrollBlank) {
-                fillScreen(0);
-                strncpy(_text, next, sizeof(_text) - 1);
-                _text[sizeof(_text) - 1] = '\0';
-                _dirty = true;
-            }
             _startScroll(next);
+        } else if (_modeConfig.scroll.continuous && _textStackCount >= 1) {
+            // Continuous: advance to next textStack entry and scroll it in
+            _startContinuousNext();
         } else {
             _render();
         }
@@ -285,13 +494,22 @@ void VirtualDisplay::_startScroll(const char* newText) {
     _scrollLastStep = millis();
 }
 
+void VirtualDisplay::_startContinuousNext() {
+    _continuousIdx = (_continuousIdx + 1) % _textStackCount;
+    const char* next = _textStack[_continuousIdx];
+    _startScroll(next);
+}
+
 void VirtualDisplay::_renderParticlesShape() {
+    if (_modeConfig.particles.speedColor) _applySpeedColors(_particleSys);
+    uint8_t pb = _modeConfig.particleBrightness;
     fillScreen(0);
     uint8_t n = _particleSys.count();
     auto style = _modeConfig.particles.renderStyle;
 
     for (uint8_t i = 0; i < n; i++) {
         const Particle& p = _particleSys.particle(i);
+        uint16_t col = (pb < 255) ? dimColor565(p.color, pb) : p.color;
         int16_t px = (int16_t)lroundf(p.pos.x);
         int16_t py = (int16_t)lroundf(p.pos.y);
 
@@ -299,33 +517,34 @@ void VirtualDisplay::_renderParticlesShape() {
             case ParticleModeConfig::RENDER_SQUARE: {
                 int16_t r = (int16_t)lroundf(p.radius);
                 if (r < 1) r = 1;
-                fillRect(px - r, py - r, 2 * r + 1, 2 * r + 1, p.color);
+                fillRect(px - r, py - r, 2 * r + 1, 2 * r + 1, col);
                 break;
             }
             case ParticleModeConfig::RENDER_CIRCLE: {
                 int16_t r = (int16_t)lroundf(p.radius);
                 if (r < 1) {
-                    drawPixel(px, py, p.color);
+                    drawPixel(px, py, col);
                 } else {
-                    fillCircle(px, py, r, p.color);
+                    fillCircle(px, py, r, col);
                 }
                 break;
             }
             case ParticleModeConfig::RENDER_TEXT: {
                 // Draw the display text centred on the particle position
-                if (_text[0] != '\0') {
-                    setTextColor(p.color);
+                const char* txt = _activeText();
+                if (txt[0] != '\0') {
+                    setTextColor(col);
                     // 6×8 font: offset by half the string width & half height
-                    int16_t tw = (int16_t)(strlen(_text) * 6);
+                    int16_t tw = (int16_t)(strlen(txt) * 6);
                     setCursor(px - tw / 2, py - 3);
-                    print(_text);
+                    print(txt);
                 }
                 break;
             }
             case ParticleModeConfig::RENDER_POINT:
             default:
                 if (px >= 0 && px < (int16_t)width() && py >= 0 && py < (int16_t)height()) {
-                    drawPixel(px, py, p.color);
+                    drawPixel(px, py, col);
                 }
                 break;
         }
@@ -340,6 +559,8 @@ static inline void rgb565_to_float(uint16_t c, float& r, float& g, float& b) {
 }
 
 void VirtualDisplay::_renderParticlesGlow() {
+    if (_modeConfig.particles.speedColor) _applySpeedColors(_particleSys);
+    float brightScale = _modeConfig.particleBrightness / 255.0f;
     uint16_t w = width();
     uint16_t h = height();
     uint16_t totalPx = w * h;
@@ -368,6 +589,7 @@ void VirtualDisplay::_renderParticlesGlow() {
             const Particle& p = _particleSys.particle(i);
             float pr, pg, pb;
             rgb565_to_float(p.color, pr, pg, pb);
+            pr *= brightScale; pg *= brightScale; pb *= brightScale;
 
             int x0 = (int)floorf(p.pos.x) - kernelRadius;
             int x1 = (int)ceilf(p.pos.x)  + kernelRadius;
@@ -433,6 +655,7 @@ void VirtualDisplay::_renderParticlesGlow() {
             const Particle& p = _particleSys.particle(i);
             float pr, pg, pb;
             rgb565_to_float(p.color, pr, pg, pb);
+            pr *= brightScale; pg *= brightScale; pb *= brightScale;
 
             int x0 = (int)floorf(p.pos.x) - kernelRadius;
             int x1 = (int)ceilf(p.pos.x)  + kernelRadius;
@@ -476,36 +699,37 @@ void VirtualDisplay::_renderParticlesGlow() {
     }
 }
 
-void VirtualDisplay::_render() {
-    fillScreen(0);
-    if (_text[0] == '\0') return;
+void VirtualDisplay::_render(bool clearFirst) {
+    if (clearFirst) fillScreen(0);
+    const char* txt = _activeText();
+    if (txt[0] == '\0') return;
 
-    const char* visible = _fitTextRight(_text);
+    const char* visible = _fitTextRight(txt);
     if (*visible == '\0') return;
 
-    setTextColor(_color);
+    setTextColor(dimColor565(_color, _modeConfig.textBrightness));
     int16_t x = _centerTextX(visible);
     setCursor(x, 0);
     print(visible);
 }
 
-void VirtualDisplay::_renderScrollFrame() {
-    fillScreen(0);
-    setTextColor(_color);
+void VirtualDisplay::_renderScrollFrame(bool clearFirst) {
+    if (clearFirst) fillScreen(0);
+    setTextColor(dimColor565(_color, _modeConfig.textBrightness));
 
-    int8_t offset = _scrollOffset;
+    int16_t offset = _scrollOffset;
     int16_t h = (int16_t)height();
 
+    // Old and new text scroll simultaneously
     int16_t oldY, newY;
     if (_modeConfig.mode == DISPLAY_MODE_SCROLL_UP) {
         oldY = -offset;
         newY = h - offset;
-    } else {  // DISPLAY_MODE_SCROLL_DOWN
+    } else {
         oldY = offset;
         newY = -(h - offset);
     }
 
-    // Draw old text
     if (_oldText[0] != '\0') {
         const char* visOld = _fitTextRight(_oldText);
         if (*visOld) {
@@ -513,8 +737,6 @@ void VirtualDisplay::_renderScrollFrame() {
             print(visOld);
         }
     }
-
-    // Draw new text
     if (_text[0] != '\0') {
         const char* visNew = _fitTextRight(_text);
         if (*visNew) {
@@ -522,6 +744,15 @@ void VirtualDisplay::_renderScrollFrame() {
             print(visNew);
         }
     }
+}
+
+void VirtualDisplay::_redrawParticleLayer() {
+    if (_modeConfig.particles.renderStyle == ParticleModeConfig::RENDER_GLOW) {
+        _renderParticlesGlow();
+    } else {
+        _renderParticlesShape();
+    }
+    _lastParticleRender = millis();
 }
 
 void VirtualDisplay::_resetQueue() {

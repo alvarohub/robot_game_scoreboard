@@ -92,18 +92,38 @@ IPAddress OSCHandler::localIP() {
 //
 //    /display/<N>              — set text (string or int arg)
 //    /display/<N>/text         — set text (string arg)
-//    /display/<N>/mode         — display mode: 0=text, 1=scroll up,
-//                                 2=scroll down, 3=particles
-//    /display/<N>/color        — set colour (3 int args: R G B)
+//    /display/<N>/mode         — display mode: 0=text, 1=scroll up, 2=scroll down
+//    /display/<N>/text/enable  — text layer: 0=off, 1=on
+//    /display/<N>/particles/enable — particles layer: 0=off, 1=on
+//    /display/<N>/text/brightness  — text layer brightness (int 0-255)
+//    /display/<N>/particles/brightness — particle layer brightness (int 0-255)
+//    /display/<N>/particles/color — particle colour (3 int args: R G B)
+//    /display/<N>/color        — text colour (3 int args: R G B)
 //    /display/<N>/clear        — clear one display
 //    /display/<N>/brightness   — per-display brightness (global for now)
 //    /display/<N>/scroll       — scroll mode: 0=instant, 1=up, 2=down
 //    /display/<N>/clearqueue   — discard pending scroll queue for one display
+//    /display/<N>/text/push    — push text to display's text stack
+//    /display/<N>/text/pop     — pop last text stack entry
+//    /display/<N>/text/set     — set text stack entry at index (int, string)
+//    /display/<N>/text/clear   — clear text stack
+//    /display/<N>/text/list    — print text stack to serial
 //    /brightness               — global brightness (int arg 0-255)
-//    /mode                     — set mode for ALL displays (int 0-3)
+//    /mode                     — set mode for ALL displays (int 0-2)
+//    /text/enable              — text layer on all displays: 0=off, 1=on
+//    /particles/enable         — particles layer on all displays: 0=off, 1=on
+//    /text/brightness          — text layer brightness (all displays, int 0-255)
+//    /particles/brightness     — particle layer brightness (all displays, int 0-255)
+//    /particles/color          — particle colour (all displays, 3 int args: R G B)
 //    /scroll                   — set scroll mode for ALL displays (int 0-2)
 //    /scrollspeed              — scroll speed in ms per pixel step (int, default 25)
-//    /scrollblank              — blank frame between scroll items: 0=off, 1=on
+//    /scrollcontinuous         — auto-cycle textStack in scroll mode: 0=off, 1=on
+//    /text/push "STR"          — push to text stack (all displays)
+//    /text/pop                 — pop text stack (all displays)
+//    /text/set N "STR"         — set text stack entry N (all displays)
+//    /text/clear               — clear text stack (all displays)
+//    /text/list                — print text stacks to serial
+//    /defaults                 — reset all params to compiled defaults
 //    /clearqueue               — discard scroll queues on all displays
 //    /clearall  or  /clear     — clear every display (also flushes queues)
 //    /status                   — replies "ANIMATING 0" or "ANIMATING 1"
@@ -114,7 +134,7 @@ IPAddress OSCHandler::localIP() {
 static bool _parseDisplayModeArg(OSCMessage& msg, int argIndex, DisplayMode* outMode) {
     if (msg.isInt(argIndex)) {
         int mode = msg.getInt(argIndex);
-        if (mode < DISPLAY_MODE_TEXT || mode > DISPLAY_MODE_PARTICLES) {
+        if (mode < DISPLAY_MODE_TEXT || mode > DISPLAY_MODE_SCROLL_DOWN) {
             return false;
         }
         *outMode = (DisplayMode)mode;
@@ -128,7 +148,7 @@ static bool _parseDisplayModeArg(OSCMessage& msg, int argIndex, DisplayMode* out
             if (*p >= 'A' && *p <= 'Z') *p = *p - 'A' + 'a';
         }
 
-        if (strcmp(modeName, "text") == 0) {
+        if (strcmp(modeName, "text") == 0 || strcmp(modeName, "immediate") == 0) {
             *outMode = DISPLAY_MODE_TEXT;
             return true;
         }
@@ -138,10 +158,6 @@ static bool _parseDisplayModeArg(OSCMessage& msg, int argIndex, DisplayMode* out
         }
         if (strcmp(modeName, "scrolldown") == 0 || strcmp(modeName, "scroll_down") == 0) {
             *outMode = DISPLAY_MODE_SCROLL_DOWN;
-            return true;
-        }
-        if (strcmp(modeName, "particles") == 0 || strcmp(modeName, "particle") == 0) {
-            *outMode = DISPLAY_MODE_PARTICLES;
             return true;
         }
     }
@@ -215,6 +231,37 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             _display.clearQueue(idx);
             Serial.printf("D%d queue cleared\n", displayNum);
         }
+        else if (strcmp(subCmd, "particles/enable") == 0) {
+            if (msg.isInt(0)) {
+                _display.setParticlesEnabled(idx, msg.getInt(0) != 0);
+                Serial.printf("D%d particles → %s\n", displayNum, msg.getInt(0) ? "ON" : "OFF");
+            }
+        }
+        else if (strcmp(subCmd, "particles/brightness") == 0) {
+            if (msg.isInt(0)) {
+                _display.setParticleBrightness(idx, msg.getInt(0));
+                Serial.printf("D%d particle brightness → %ld\n", displayNum, (long)msg.getInt(0));
+            }
+        }
+        else if (strcmp(subCmd, "particles/color") == 0) {
+            if (msg.size() >= 3 && msg.isInt(0)) {
+                _display.setParticleColor(idx, msg.getInt(0), msg.getInt(1), msg.getInt(2));
+                Serial.printf("D%d particle color (%ld,%ld,%ld)\n", displayNum,
+                              (long)msg.getInt(0), (long)msg.getInt(1), (long)msg.getInt(2));
+            }
+        }
+        else if (strcmp(subCmd, "text/enable") == 0) {
+            if (msg.isInt(0)) {
+                _display.setTextEnabled(idx, msg.getInt(0) != 0);
+                Serial.printf("D%d text → %s\n", displayNum, msg.getInt(0) ? "ON" : "OFF");
+            }
+        }
+        else if (strcmp(subCmd, "text/brightness") == 0) {
+            if (msg.isInt(0)) {
+                _display.setTextBrightness(idx, msg.getInt(0));
+                Serial.printf("D%d text brightness → %ld\n", displayNum, (long)msg.getInt(0));
+            }
+        }
         else if (strcmp(subCmd, "particles") == 0) {
             // /display/<N>/particles count renderMs gravityScale elasticity wallElasticity
             //   radius renderStyle glowSigma temperature attractStrength attractRange
@@ -238,12 +285,50 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (msg.size() >= 13 && msg.isInt(12))   cfg.substepMs      = msg.getInt(12);
                 if (msg.size() >= 14 && msg.isFloat(13)) cfg.damping        = msg.getFloat(13);
                 if (msg.size() >= 15 && msg.isFloat(14)) cfg.glowWavelength = msg.getFloat(14);
+                if (msg.size() >= 16 && msg.isInt(15))   cfg.speedColor     = (msg.getInt(15) != 0);
                 _display.setParticleConfig(idx, cfg);
                 Serial.printf("D%d particles: n=%d grav=%.1f(%s) el=%.2f att=%.2f@%.1f temp=%.2f\n",
                               displayNum, cfg.count,
                               cfg.gravityScale, cfg.gravityEnabled ? "on" : "off",
                               cfg.elasticity, cfg.attractStrength, cfg.attractRange,
                               cfg.temperature);
+            }
+        }
+        // ── /display/<N>/text/push "STR" — per-display text stack ─
+        else if (strcmp(subCmd, "text/push") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd && msg.isString(0)) {
+                char text[TEXT_MAX_LEN];
+                msg.getString(0, text, sizeof(text));
+                vd->textPush(text);
+                Serial.printf("D%d text push → \"%s\"\n", displayNum, text);
+            }
+        }
+        else if (strcmp(subCmd, "text/pop") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) { vd->textPop(); Serial.printf("D%d text pop\n", displayNum); }
+        }
+        else if (strcmp(subCmd, "text/set") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd && msg.size() >= 2 && msg.isInt(0) && msg.isString(1)) {
+                uint8_t ti = msg.getInt(0);
+                char text[TEXT_MAX_LEN];
+                msg.getString(1, text, sizeof(text));
+                vd->textSet(ti, text);
+                Serial.printf("D%d text set [%d] → \"%s\"\n", displayNum, ti, text);
+            }
+        }
+        else if (strcmp(subCmd, "text/clear") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) { vd->textClear(); Serial.printf("D%d text stack cleared\n", displayNum); }
+        }
+        else if (strcmp(subCmd, "text/list") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                Serial.printf("D%d text stack (%d entries):\n", displayNum, vd->textCount());
+                for (uint8_t j = 0; j < vd->textCount(); j++) {
+                    Serial.printf("  [%d] \"%s\"\n", j, vd->textGet(j));
+                }
             }
         }
     }
@@ -262,6 +347,42 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             Serial.printf("All mode → %d\n", (int)mode);
         }
     }
+    // ── /particles/enable — toggle particles overlay (all) ──
+    else if (strcmp(address, "/particles/enable") == 0) {
+        if (msg.isInt(0)) {
+            _display.setParticlesEnabled(msg.getInt(0) != 0);
+            Serial.printf("All particles → %s\n", msg.getInt(0) ? "ON" : "OFF");
+        }
+    }
+    // ── /particles/brightness — particle layer brightness (all) ─
+    else if (strcmp(address, "/particles/brightness") == 0) {
+        if (msg.isInt(0)) {
+            _display.setParticleBrightness(msg.getInt(0));
+            Serial.printf("All particle brightness → %ld\n", (long)msg.getInt(0));
+        }
+    }
+    // ── /particles/color — particle colour (all, R G B) ─────
+    else if (strcmp(address, "/particles/color") == 0) {
+        if (msg.size() >= 3 && msg.isInt(0)) {
+            _display.setParticleColor(msg.getInt(0), msg.getInt(1), msg.getInt(2));
+            Serial.printf("All particle color (%ld,%ld,%ld)\n",
+                          (long)msg.getInt(0), (long)msg.getInt(1), (long)msg.getInt(2));
+        }
+    }
+    // ── /text/enable — toggle text layer (all) ──────────────
+    else if (strcmp(address, "/text/enable") == 0) {
+        if (msg.isInt(0)) {
+            _display.setTextEnabled(msg.getInt(0) != 0);
+            Serial.printf("All text → %s\n", msg.getInt(0) ? "ON" : "OFF");
+        }
+    }
+    // ── /text/brightness — text layer brightness (all) ──────
+    else if (strcmp(address, "/text/brightness") == 0) {
+        if (msg.isInt(0)) {
+            _display.setTextBrightness(msg.getInt(0));
+            Serial.printf("All text brightness → %ld\n", (long)msg.getInt(0));
+        }
+    }
     // ── /scroll — set scroll mode for all displays ──────────
     else if (strcmp(address, "/scroll") == 0) {
         if (msg.isInt(0)) {
@@ -277,12 +398,78 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             Serial.printf("Scroll speed → %ld ms\n", (long)msg.getInt(0));
         }
     }
-    // ── /scrollblank — blank frame between scroll items ──────
-    else if (strcmp(address, "/scrollblank") == 0) {
+    // ── /scrollcontinuous — auto-cycle textStack in scroll mode ─
+    else if (strcmp(address, "/scrollcontinuous") == 0) {
         if (msg.isInt(0)) {
-            _display.setScrollBlank(msg.getInt(0) != 0);
-            Serial.printf("Scroll blank → %s\n", msg.getInt(0) ? "ON" : "OFF");
+            _display.setScrollContinuous(msg.getInt(0) != 0);
+            Serial.printf("Scroll continuous → %s\n", msg.getInt(0) ? "ON" : "OFF");
         }
+    }
+    // ── /display/<N>/text/push "STRING" — push to text stack ─
+    // ── /text/push "STRING" ────── push to all displays ──────
+    // (handled via display-specific routing above, plus global aliases below)
+
+    // ── Text stack commands (global — applies to all displays) ─
+    else if (strcmp(address, "/text/push") == 0) {
+        if (msg.isString(0)) {
+            char text[TEXT_MAX_LEN];
+            msg.getString(0, text, sizeof(text));
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->textPush(text);
+            }
+            Serial.printf("Text push → \"%s\" (all displays)\n", text);
+        }
+    }
+    else if (strcmp(address, "/text/pop") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->textPop();
+        }
+        Serial.println("Text pop (all displays)");
+    }
+    else if (strcmp(address, "/text/set") == 0) {
+        if (msg.size() >= 2 && msg.isInt(0) && msg.isString(1)) {
+            uint8_t idx = msg.getInt(0);
+            char text[TEXT_MAX_LEN];
+            msg.getString(1, text, sizeof(text));
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->textSet(idx, text);
+            }
+            Serial.printf("Text set [%d] → \"%s\" (all displays)\n", idx, text);
+        }
+    }
+    else if (strcmp(address, "/text/clear") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->textClear();
+        }
+        Serial.println("Text stack cleared (all displays)");
+    }
+    else if (strcmp(address, "/text/list") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (!vd) continue;
+            Serial.printf("D%d text stack (%d entries):\n", i + 1, vd->textCount());
+            for (uint8_t j = 0; j < vd->textCount(); j++) {
+                Serial.printf("  [%d] \"%s\"\n", j, vd->textGet(j));
+            }
+        }
+    }
+    // ── /defaults — reset all params to compiled defaults ────
+    else if (strcmp(address, "/defaults") == 0) {
+        _display.clearAll();
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) {
+                vd->textClear();
+                DisplayModeConfig mc;  // default-constructed = all defaults
+                vd->setMode(mc);
+            }
+        }
+        _display.setBrightness(DEFAULT_BRIGHTNESS);
+        Serial.println("All params reset to defaults");
     }
     // ── /clearqueue — flush all scroll queues ────────────────
     else if (strcmp(address, "/clearqueue") == 0) {

@@ -99,9 +99,59 @@ void DisplayManager::setScrollSpeed(uint8_t ms) {
         _vDisplays[i]->setScrollSpeed(ms);
 }
 
-void DisplayManager::setScrollBlank(bool enabled) {
+void DisplayManager::setScrollContinuous(bool enabled) {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
-        _vDisplays[i]->setScrollBlank(enabled);
+        _vDisplays[i]->setScrollContinuous(enabled);
+}
+
+void DisplayManager::setParticlesEnabled(bool enabled) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setParticlesEnabled(enabled);
+}
+
+void DisplayManager::setParticlesEnabled(uint8_t idx, bool enabled) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setParticlesEnabled(enabled);
+}
+
+void DisplayManager::setTextEnabled(bool enabled) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setTextEnabled(enabled);
+}
+
+void DisplayManager::setTextEnabled(uint8_t idx, bool enabled) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setTextEnabled(enabled);
+}
+
+void DisplayManager::setTextBrightness(uint8_t b) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setTextBrightness(b);
+}
+
+void DisplayManager::setTextBrightness(uint8_t idx, uint8_t b) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setTextBrightness(b);
+}
+
+void DisplayManager::setParticleBrightness(uint8_t b) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setParticleBrightness(b);
+}
+
+void DisplayManager::setParticleBrightness(uint8_t idx, uint8_t b) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setParticleBrightness(b);
+}
+
+void DisplayManager::setParticleColor(uint8_t r, uint8_t g, uint8_t b) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setParticleColor(r, g, b);
+}
+
+void DisplayManager::setParticleColor(uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setParticleColor(r, g, b);
 }
 
 void DisplayManager::setGravity(float gx, float gy) {
@@ -202,12 +252,13 @@ void DisplayManager::showTestPattern() {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         char label[8];
         snprintf(label, sizeof(label), "D%d", i + 1);
-        DisplayModeConfig savedConfig = _vDisplays[i]->modeConfig();
-        _vDisplays[i]->setMode(DISPLAY_MODE_TEXT);
         _vDisplays[i]->setColor(colors[i % 6]);
-        _vDisplays[i]->setText(label);
+        // Draw directly without setText (avoid polluting the stack)
+        _vDisplays[i]->fillScreen(0);
+        _vDisplays[i]->setTextColor(colors[i % 6]);
+        _vDisplays[i]->setCursor(0, 0);
+        _vDisplays[i]->print(label);
         update();
-        _vDisplays[i]->setMode(savedConfig);
         delay(300);
     }
 
@@ -241,27 +292,45 @@ void DisplayManager::showRasterScan(uint16_t delayMs) {
 void DisplayManager::startDisplay(unsigned long durationMs) {
     uint16_t cyan = rgb565(0, 255, 255);
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
-        DisplayModeConfig savedConfig = _vDisplays[i]->modeConfig();
-        _vDisplays[i]->setMode(DISPLAY_MODE_SCROLL_DOWN);
-        _vDisplays[i]->setColor(cyan);
-        _vDisplays[i]->setText("GAME");
-        _vDisplays[i]->setMode(savedConfig);
+        char label[8];
+        snprintf(label, sizeof(label), "DISP%d", i + 1);
+        // Draw label directly (no stack pollution)
+        _vDisplays[i]->fillScreen(0);
+        _vDisplays[i]->setTextColor(cyan);
+        _vDisplays[i]->setCursor(0, 0);
+        _vDisplays[i]->print(label);
     }
     update();
-    delay(durationMs);
-    clearAll();
+    delay(durationMs / 2);
+
+    // Show READY on each display
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        _vDisplays[i]->fillScreen(0);
+        _vDisplays[i]->setTextColor(cyan);
+        _vDisplays[i]->setCursor(0, 0);
+        _vDisplays[i]->print("READY");
+    }
+    update();
+    delay(durationMs / 2);
+
+    // Clear everything including text stack
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        _vDisplays[i]->textClear();
+    }
     update();
 }
 
 // ══════════════════════════════════════════════════════════════
 //  NVS save / load — persists key display parameters
+//  Version byte to detect format changes. Current version: 4
 // ══════════════════════════════════════════════════════════════
+static const uint8_t NVS_PARAM_VERSION = 4;
 
 void DisplayManager::saveParams() {
     _prefs.begin("disp", false);           // read-write
+    _prefs.putUChar("version", NVS_PARAM_VERSION);
     _prefs.putUChar("bright", _brightness);
 
-    // Save per-display state (only display 0 for now = NUM_DISPLAYS=1)
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         VirtualDisplay* vd = _vDisplays[i];
         const DisplayModeConfig& mc = vd->modeConfig();
@@ -278,16 +347,46 @@ void DisplayManager::saveParams() {
         const ParticleModeConfig& p = mc.particles;
         _prefs.putBytes(key, &p, sizeof(ParticleModeConfig));
 
+        // Scroll config
         snprintf(key, sizeof(key), "sms%d", i);
-        _prefs.putUChar(key, mc.scrollStepMs);
+        _prefs.putUChar(key, mc.scroll.scrollStepMs);
 
-        snprintf(key, sizeof(key), "sblk%d", i);
-        _prefs.putBool(key, mc.scrollBlank);
+        snprintf(key, sizeof(key), "scnt%d", i);
+        _prefs.putBool(key, mc.scroll.continuous);
+
+        // Text mode config
+        snprintf(key, sizeof(key), "tidx%d", i);
+        _prefs.putUChar(key, mc.text.textIndex);
+
+        // Particles enabled (overlay)
+        snprintf(key, sizeof(key), "pen%d", i);
+        _prefs.putBool(key, mc.particlesEnabled);
+
+        // v4: layer controls
+        snprintf(key, sizeof(key), "ten%d", i);
+        _prefs.putBool(key, mc.textEnabled);
+
+        snprintf(key, sizeof(key), "tbr%d", i);
+        _prefs.putUChar(key, mc.textBrightness);
+
+        snprintf(key, sizeof(key), "pbr%d", i);
+        _prefs.putUChar(key, mc.particleBrightness);
+
+        snprintf(key, sizeof(key), "pcl%d", i);
+        _prefs.putUShort(key, mc.particleColor);
+
+        // Text stack
+        snprintf(key, sizeof(key), "tsn%d", i);
+        _prefs.putUChar(key, vd->textCount());
+        for (uint8_t j = 0; j < vd->textCount(); j++) {
+            snprintf(key, sizeof(key), "ts%d_%d", i, j);
+            _prefs.putString(key, vd->textGet(j));
+        }
     }
 
     _prefs.putBool("valid", true);
     _prefs.end();
-    Serial.println("Params saved to NVS");
+    Serial.println("Params saved to NVS (v4)");
 }
 
 void DisplayManager::loadParams() {
@@ -297,6 +396,8 @@ void DisplayManager::loadParams() {
         Serial.println("No saved params in NVS");
         return;
     }
+
+    uint8_t ver = _prefs.getUChar("version", 1);
 
     setBrightness(_prefs.getUChar("bright", DEFAULT_BRIGHTNESS));
 
@@ -319,17 +420,51 @@ void DisplayManager::loadParams() {
         mc.mode = (DisplayMode)_prefs.getUChar(key, (uint8_t)DISPLAY_MODE_TEXT);
 
         snprintf(key, sizeof(key), "sms%d", i);
-        mc.scrollStepMs = _prefs.getUChar(key, SCROLL_STEP_MS);
+        mc.scroll.scrollStepMs = _prefs.getUChar(key, SCROLL_STEP_MS);
 
-        snprintf(key, sizeof(key), "sblk%d", i);
-        mc.scrollBlank = _prefs.getBool(key, false);
+        if (ver >= 2) {
+            snprintf(key, sizeof(key), "scnt%d", i);
+            mc.scroll.continuous = _prefs.getBool(key, false);
+
+            snprintf(key, sizeof(key), "tidx%d", i);
+            mc.text.textIndex = _prefs.getUChar(key, 0);
+
+            // Text stack
+            snprintf(key, sizeof(key), "tsn%d", i);
+            uint8_t tsCount = _prefs.getUChar(key, 0);
+            vd->textClear();
+            for (uint8_t j = 0; j < tsCount && j < TEXT_STACK_MAX; j++) {
+                snprintf(key, sizeof(key), "ts%d_%d", i, j);
+                String s = _prefs.getString(key, "");
+                if (s.length() > 0) vd->textPush(s.c_str());
+            }
+        }
+
+        if (ver >= 3) {
+            snprintf(key, sizeof(key), "pen%d", i);
+            mc.particlesEnabled = _prefs.getBool(key, false);
+        }
+
+        if (ver >= 4) {
+            snprintf(key, sizeof(key), "ten%d", i);
+            mc.textEnabled = _prefs.getBool(key, true);
+
+            snprintf(key, sizeof(key), "tbr%d", i);
+            mc.textBrightness = _prefs.getUChar(key, 255);
+
+            snprintf(key, sizeof(key), "pbr%d", i);
+            mc.particleBrightness = _prefs.getUChar(key, 255);
+
+            snprintf(key, sizeof(key), "pcl%d", i);
+            mc.particleColor = _prefs.getUShort(key, 0xFFFF);
+        }
 
         mc.particles = pcfg;
         vd->setMode(mc);
     }
 
     _prefs.end();
-    Serial.println("Params loaded from NVS");
+    Serial.printf("Params loaded from NVS (v%d)\n", ver);
 }
 
 // ══════════════════════════════════════════════════════════════

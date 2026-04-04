@@ -1,14 +1,9 @@
 {
   "display": 1,
   "brightness": 4,
-  "color": [
-    87,
-    127,
-    36
-  ],
+  "color": [87, 127, 36],
   "mode": "particles",
   "scrollspeed": 50,
-  "scrollblank": false,
   "particles": {
     "count": 64,
     "renderMs": 5,
