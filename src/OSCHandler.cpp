@@ -92,12 +92,15 @@ IPAddress OSCHandler::localIP() {
 //
 //    /display/<N>              — set text (string or int arg)
 //    /display/<N>/text         — set text (string arg)
+//    /display/<N>/mode         — display mode: 0=text, 1=scroll up,
+//                                 2=scroll down, 3=particles
 //    /display/<N>/color        — set colour (3 int args: R G B)
 //    /display/<N>/clear        — clear one display
 //    /display/<N>/brightness   — per-display brightness (global for now)
 //    /display/<N>/scroll       — scroll mode: 0=instant, 1=up, 2=down
 //    /display/<N>/clearqueue   — discard pending scroll queue for one display
 //    /brightness               — global brightness (int arg 0-255)
+//    /mode                     — set mode for ALL displays (int 0-3)
 //    /scroll                   — set scroll mode for ALL displays (int 0-2)
 //    /scrollspeed              — scroll speed in ms per pixel step (int, default 25)
 //    /scrollblank              — blank frame between scroll items: 0=off, 1=on
@@ -107,6 +110,44 @@ IPAddress OSCHandler::localIP() {
 //
 //  Display numbers are 1-based in OSC (mapped to 0-based internally).
 // ══════════════════════════════════════════════════════════════
+
+static bool _parseDisplayModeArg(OSCMessage& msg, int argIndex, DisplayMode* outMode) {
+    if (msg.isInt(argIndex)) {
+        int mode = msg.getInt(argIndex);
+        if (mode < DISPLAY_MODE_TEXT || mode > DISPLAY_MODE_PARTICLES) {
+            return false;
+        }
+        *outMode = (DisplayMode)mode;
+        return true;
+    }
+
+    if (msg.isString(argIndex)) {
+        char modeName[24];
+        msg.getString(argIndex, modeName, sizeof(modeName));
+        for (char* p = modeName; *p; ++p) {
+            if (*p >= 'A' && *p <= 'Z') *p = *p - 'A' + 'a';
+        }
+
+        if (strcmp(modeName, "text") == 0) {
+            *outMode = DISPLAY_MODE_TEXT;
+            return true;
+        }
+        if (strcmp(modeName, "scrollup") == 0 || strcmp(modeName, "scroll_up") == 0) {
+            *outMode = DISPLAY_MODE_SCROLL_UP;
+            return true;
+        }
+        if (strcmp(modeName, "scrolldown") == 0 || strcmp(modeName, "scroll_down") == 0) {
+            *outMode = DISPLAY_MODE_SCROLL_DOWN;
+            return true;
+        }
+        if (strcmp(modeName, "particles") == 0 || strcmp(modeName, "particle") == 0) {
+            *outMode = DISPLAY_MODE_PARTICLES;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 void OSCHandler::_processMessage(OSCMessage& msg) {
     char address[64];
@@ -135,6 +176,13 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 snprintf(text, sizeof(text), "%ld", (long)msg.getInt(0));
                 _display.setText(idx, text);
                 Serial.printf("D%d ← %s\n", displayNum, text);
+            }
+        }
+        else if (strcmp(subCmd, "mode") == 0) {
+            DisplayMode mode;
+            if (_parseDisplayModeArg(msg, 0, &mode)) {
+                _display.setMode(idx, mode);
+                Serial.printf("D%d mode → %d\n", displayNum, (int)mode);
             }
         }
         else if (strcmp(subCmd, "color") == 0) {
@@ -167,12 +215,51 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             _display.clearQueue(idx);
             Serial.printf("D%d queue cleared\n", displayNum);
         }
+        else if (strcmp(subCmd, "particles") == 0) {
+            // /display/<N>/particles count renderMs gravityScale elasticity wallElasticity
+            //   radius renderStyle glowSigma temperature attractStrength attractRange
+            //   gravityEnabled substepMs damping glowWavelength
+            // All args optional — missing args keep current values
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                ParticleModeConfig cfg = vd->modeConfig().particles;
+                if (msg.size() >= 1 && msg.isInt(0))   cfg.count          = msg.getInt(0);
+                if (msg.size() >= 2 && msg.isInt(1))   cfg.renderMs       = msg.getInt(1);
+                if (msg.size() >= 3 && msg.isFloat(2)) cfg.gravityScale   = msg.getFloat(2);
+                if (msg.size() >= 4 && msg.isFloat(3)) cfg.elasticity     = msg.getFloat(3);
+                if (msg.size() >= 5 && msg.isFloat(4)) cfg.wallElasticity = msg.getFloat(4);
+                if (msg.size() >= 6 && msg.isFloat(5)) cfg.radius         = msg.getFloat(5);
+                if (msg.size() >= 7 && msg.isInt(6))   cfg.renderStyle    = (ParticleModeConfig::RenderStyle)msg.getInt(6);
+                if (msg.size() >= 8 && msg.isFloat(7)) cfg.glowSigma      = msg.getFloat(7);
+                if (msg.size() >= 9 && msg.isFloat(8)) cfg.temperature    = msg.getFloat(8);
+                if (msg.size() >= 10 && msg.isFloat(9))  cfg.attractStrength = msg.getFloat(9);
+                if (msg.size() >= 11 && msg.isFloat(10)) cfg.attractRange   = msg.getFloat(10);
+                if (msg.size() >= 12 && msg.isInt(11))   cfg.gravityEnabled = (msg.getInt(11) != 0);
+                if (msg.size() >= 13 && msg.isInt(12))   cfg.substepMs      = msg.getInt(12);
+                if (msg.size() >= 14 && msg.isFloat(13)) cfg.damping        = msg.getFloat(13);
+                if (msg.size() >= 15 && msg.isFloat(14)) cfg.glowWavelength = msg.getFloat(14);
+                _display.setParticleConfig(idx, cfg);
+                Serial.printf("D%d particles: n=%d grav=%.1f(%s) el=%.2f att=%.2f@%.1f temp=%.2f\n",
+                              displayNum, cfg.count,
+                              cfg.gravityScale, cfg.gravityEnabled ? "on" : "off",
+                              cfg.elasticity, cfg.attractStrength, cfg.attractRange,
+                              cfg.temperature);
+            }
+        }
     }
     // ── /brightness ──────────────────────────────────────────
     else if (strcmp(address, "/brightness") == 0) {
         if (msg.isInt(0)) {
             _display.setBrightness(msg.getInt(0));
             Serial.printf("Brightness → %ld\n", (long)msg.getInt(0));
+        }
+    }
+    // ── /mode — set display mode for all displays ────────────
+    else if (strcmp(address, "/mode") == 0) {
+        DisplayMode mode;
+        if (_parseDisplayModeArg(msg, 0, &mode)) {
+            _display.setModeAll(mode);
+            Serial.printf("All mode → %d\n", (int)mode);
         }
     }
     // ── /scroll — set scroll mode for all displays ──────────
@@ -217,6 +304,14 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         uint16_t ms = (msg.size() >= 1 && msg.isInt(0)) ? msg.getInt(0) : 30;
         _display.showRasterScan(ms);
     }
+    // ── /saveparams — persist to ESP32 NVS ───────────────────
+    else if (strcmp(address, "/saveparams") == 0) {
+        _display.saveParams();
+    }
+    // ── /loadparams — restore from ESP32 NVS ─────────────────
+    else if (strcmp(address, "/loadparams") == 0) {
+        _display.loadParams();
+    }
     else {
         Serial.printf("Unknown OSC: %s\n", address);
     }
@@ -251,7 +346,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
 void OSCHandler::processSerial() {
     while (Serial.available()) {
         char c = Serial.read();
-        Serial.write(c);  // echo back for user feedback
+ //       Serial.write(c);  // echo back for user feedback
         if (c == '\n' || c == '\r') {
             if (_serialPos > 0) {
                 _serialBuf[_serialPos] = '\0';
@@ -348,13 +443,25 @@ void OSCHandler::_handleSerialLine(const char* line) {
             if (*p == '"') p++;  // skip closing quote
             msg.add(strArg);
         } else {
-            // Try integer
+            // Try number: float if it contains '.', otherwise integer
             char* end = nullptr;
-            long val = strtol(p, &end, 10);
-            if (end != p) {
-                msg.add((int32_t)val);
-                p = end;
+            bool parsed = false;
+
+            // Peek ahead to decide float vs int
+            bool hasDecimal = false;
+            for (const char* q = p; *q && *q != ' ' && *q != '\t'; q++) {
+                if (*q == '.') { hasDecimal = true; break; }
+            }
+
+            if (hasDecimal) {
+                float fval = strtof(p, &end);
+                if (end != p) { msg.add(fval); p = end; parsed = true; }
             } else {
+                long val = strtol(p, &end, 10);
+                if (end != p) { msg.add((int32_t)val); p = end; parsed = true; }
+            }
+
+            if (!parsed) {
                 // Unquoted string token (until next space)
                 char tok[64];
                 size_t ti = 0;
@@ -373,6 +480,8 @@ void OSCHandler::_handleSerialLine(const char* line) {
             char tmp[64];
             msg.getString(a, tmp, sizeof(tmp));
             Serial.printf(" \"%s\"", tmp);
+        } else if (msg.isFloat(a)) {
+            Serial.printf(" %.3f", msg.getFloat(a));
         } else if (msg.isInt(a)) {
             Serial.printf(" %ld", (long)msg.getInt(a));
         }

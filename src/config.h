@@ -78,13 +78,6 @@
   #define SERIAL_CMD_ENABLED 1
 #endif
 
-// ── WiFi prompt ──────────────────────────────────────────────
-// Seconds to wait for button press before skipping WiFi.
-// Set to 0 to always connect without asking.
-#ifndef WIFI_PROMPT_SECONDS
-  #define WIFI_PROMPT_SECONDS 2
-#endif
-
 // ── Ethernet W5500 pins (M5Stack Ethernet Unit) ─────────────
 #ifdef USE_ETHERNET_W5500
   #ifndef ETH_CS_PIN

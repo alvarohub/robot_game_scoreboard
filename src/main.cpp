@@ -63,6 +63,9 @@ void setup() {
     Serial.printf("  Displays     : %d × %d×%d\n",
                   NUM_DISPLAYS, MATRIX_TILE_WIDTH, MATRIX_TILE_HEIGHT);
     Serial.printf("  OSC port     : %d\n", OSC_PORT);
+#ifdef USE_M5UNIFIED
+    Serial.printf("  IMU          : %s\n", M5.Imu.isEnabled() ? "enabled" : "not detected");
+#endif
 
 #ifdef USE_RS485
     Serial2.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
@@ -75,53 +78,16 @@ void setup() {
     displayManager.showTestPattern();
     displayManager.startDisplay();
 
-    // ── WiFi prompt: press button to connect, or wait to skip ──
+    // ── Network ────────────────────────────────────────────────
 
-#if defined(USE_WIFI) && defined(USE_M5UNIFIED) && (WIFI_PROMPT_SECONDS > 0)
-    lcdStatus("WiFi?", "Press to connect", TFT_YELLOW);
-    Serial.printf("Press button within %d s to connect WiFi…\n",
-                  WIFI_PROMPT_SECONDS);
-
-    bool buttonPressed = false;
-    unsigned long promptStart = millis();
-    while (millis() - promptStart < (unsigned long)WIFI_PROMPT_SECONDS * 1000) {
-        M5.update();
-        if (M5.BtnA.wasPressed()) {
-            buttonPressed = true;
-            break;
-        }
-        delay(50);
-    }
-
-    if (buttonPressed) {
-        lcdStatus("Connecting", "WiFi...", TFT_YELLOW);
-
-        if (osc.begin()) {
-            networkUp = true;
-            IPAddress ip = osc.localIP();
-            Serial.printf("Connected — IP %s\n", ip.toString().c_str());
-            lcdStatus("Ready", ip.toString().c_str(), TFT_GREEN);
-            delay(4000);
-        } else {
-            Serial.println("*** WiFi failed — continuing serial-only ***");
-            lcdStatus("WiFi FAIL", "serial only", TFT_RED);
-            delay(2000);
-        }
-    } else {
-        Serial.println("WiFi skipped — serial-only mode");
-        lcdStatus("Serial", "mode", TFT_CYAN);
-        delay(2000);
-    }
-
-#elif defined(USE_WIFI) || defined(USE_ETHERNET_W5500)
-    // No button prompt — always connect (non-M5 boards or prompt disabled)
+#if defined(USE_WIFI) || defined(USE_ETHERNET_W5500)
 #ifdef USE_M5UNIFIED
     lcdStatus("Connecting", "network...", TFT_YELLOW);
 #endif
     if (osc.begin()) {
         networkUp = true;
         IPAddress ip = osc.localIP();
-        Serial.printf("Showing IP for 4 s: %s\n", ip.toString().c_str());
+        Serial.printf("Network up — IP %s\n", ip.toString().c_str());
 #ifdef USE_M5UNIFIED
         lcdStatus("Ready", ip.toString().c_str(), TFT_GREEN);
 #endif
@@ -145,7 +111,7 @@ void setup() {
 // ── Loop ─────────────────────────────────────────────────────
 void loop() {
 #ifdef USE_M5UNIFIED
-    M5.update();         // poll button, IMU, etc.
+    M5.update();         // poll button, etc.
 #endif
     if (networkUp) osc.update();  // read & dispatch incoming OSC packets
 #if SERIAL_CMD_ENABLED

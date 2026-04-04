@@ -1,0 +1,29 @@
+{
+  "display": 1,
+  "brightness": 6,
+  "color": [
+    46,
+    164,
+    187
+  ],
+  "mode": "particles",
+  "scrollspeed": 50,
+  "scrollblank": false,
+  "particles": {
+    "count": 11,
+    "renderMs": 5,
+    "substepMs": 15,
+    "gravityScale": 18.0,
+    "gravityEnabled": true,
+    "elasticity": 0.881578947368421,
+    "wallElasticity": 0.9473684210526315,
+    "damping": 0.9999,
+    "radius": 0.3,
+    "renderStyle": 4,
+    "glowSigma": 4.0,
+    "temperature": 0.2948717948717949,
+    "attractStrength": 0.4605263157894737,
+    "attractRange": 2.8684210526315788,
+    "glowWavelength": 3.5833333333333335
+  }
+}

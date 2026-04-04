@@ -79,6 +79,30 @@ client.send_message("/display/3/text", "HI")
 
 ---
 
+### `/display/<N>/mode` — set display mode
+
+| Parameter | Type            | Description                                                     |
+| --------- | --------------- | --------------------------------------------------------------- |
+| arg 0     | `int`\|`string` | `0`/`text`, `1`/`scroll_up`, `2`/`scroll_down`, `3`/`particles` |
+
+Selects the active rendering mode for display _N_.
+
+| Mode | Name          | Behaviour                                    |
+| ---- | ------------- | -------------------------------------------- |
+| `0`  | `text`        | Static text rendering                        |
+| `1`  | `scroll_up`   | Text changes scroll upward                   |
+| `2`  | `scroll_down` | Text changes scroll downward                 |
+| `3`  | `particles`   | Tilt-driven particle system using AtomS3 IMU |
+
+**Serial:**
+
+```
+/display/1/mode 3
+/display/1/mode text
+```
+
+---
+
 ### `/display/<N>/color` — set text colour
 
 | Parameter | Type  | Description     |
@@ -156,19 +180,20 @@ client.send_message("/display/1/brightness", 80)
 
 ---
 
-### `/display/<N>/scroll` — set scroll transition mode
+### `/display/<N>/scroll` — compatibility alias for text scroll modes
 
-| Parameter | Type  | Description                                |
-| --------- | ----- | ------------------------------------------ |
-| arg 0     | `int` | `0` = instant, `1` = scroll up, `2` = down |
+| Parameter | Type  | Description                                    |
+| --------- | ----- | ---------------------------------------------- |
+| arg 0     | `int` | `0` = text, `1` = scroll up, `2` = scroll down |
 
-Controls how text changes are animated on display _N_:
+Compatibility wrapper around `/display/<N>/mode` for the text-related modes.
+It does not expose particle mode; use `/display/<N>/mode 3` for that.
 
-| Mode | Constant      | Behaviour                               |
-| ---- | ------------- | --------------------------------------- |
-| `0`  | `SCROLL_NONE` | Instant replacement (default)           |
-| `1`  | `SCROLL_UP`   | Old text scrolls up, new enters below   |
-| `2`  | `SCROLL_DOWN` | Old text scrolls down, new enters above |
+| Mode | Behaviour                               |
+| ---- | --------------------------------------- |
+| `0`  | Instant replacement (default)           |
+| `1`  | Old text scrolls up, new enters below   |
+| `2`  | Old text scrolls down, new enters above |
 
 The scroll animation is non-blocking (driven by `update()` in the
 main loop) at `SCROLL_STEP_MS` (default 15 ms) per pixel step —
@@ -220,11 +245,28 @@ oscsend 192.168.1.42 9000 /brightness i 40
 
 ---
 
-### `/scroll` — set scroll mode for all displays
+### `/mode` — set display mode for all displays
 
-| Parameter | Type  | Description                                |
-| --------- | ----- | ------------------------------------------ |
-| arg 0     | `int` | `0` = instant, `1` = scroll up, `2` = down |
+| Parameter | Type            | Description                                                     |
+| --------- | --------------- | --------------------------------------------------------------- |
+| arg 0     | `int`\|`string` | `0`/`text`, `1`/`scroll_up`, `2`/`scroll_down`, `3`/`particles` |
+
+Same as `/display/<N>/mode` but applies to every display at once.
+
+**Serial:**
+
+```
+/mode particles
+/mode 0
+```
+
+---
+
+### `/scroll` — compatibility alias for text scroll modes
+
+| Parameter | Type  | Description                                    |
+| --------- | ----- | ---------------------------------------------- |
+| arg 0     | `int` | `0` = text, `1` = scroll up, `2` = scroll down |
 
 Same as `/display/<N>/scroll` but applies to every display at once.
 

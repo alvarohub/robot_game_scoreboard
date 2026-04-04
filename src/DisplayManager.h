@@ -15,6 +15,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_NeoMatrix.h>
 #include <Adafruit_NeoPixel.h>
+#include <Preferences.h>
 #include "config.h"
 #include "VirtualDisplay.h"
 
@@ -31,11 +32,19 @@ public:
     void setColor(uint8_t displayIndex, uint16_t color565);
     void clear(uint8_t displayIndex);
 
-    // ── Scroll mode ─────────────────────────────────────────────────
+    // ── Display modes ───────────────────────────────────────────────
+    void setMode(uint8_t displayIndex, DisplayMode mode);
+    void setMode(uint8_t displayIndex, const DisplayModeConfig& config);
+    void setModeAll(DisplayMode mode);
+
+    // ── Compatibility scroll API ───────────────────────────────────
     void setScrollMode(uint8_t displayIndex, uint8_t mode);
     void setScrollModeAll(uint8_t mode);
     void setScrollSpeed(uint8_t ms);
     void setScrollBlank(bool enabled);
+    void setGravity(float gx, float gy);
+    void setParticleConfig(const ParticleModeConfig& cfg);
+    void setParticleConfig(uint8_t displayIndex, const ParticleModeConfig& cfg);
 
     // ── Scroll queue ────────────────────────────────────────────────
     void clearQueue(uint8_t displayIndex);
@@ -43,7 +52,13 @@ public:
 
     // ── Global operations ───────────────────────────────────────────
     void setBrightness(uint8_t brightness);
+    uint8_t brightness() const { return _brightness; }
     void clearAll();
+
+    /// Save current display params (brightness, color, mode, particles) to NVS.
+    void saveParams();
+    /// Load display params from NVS and apply them.
+    void loadParams();
 
     /// Call every loop iteration — updates all VirtualDisplays,
     /// composites them, and pushes pixels to the strip.
@@ -79,6 +94,11 @@ private:
     VirtualDisplay*    _vDisplays[NUM_DISPLAYS];
     int16_t            _offsets[NUM_DISPLAYS];   // X-offset of each display on the strip
     bool               _needsUpdate;
+    uint8_t            _brightness = DEFAULT_BRIGHTNESS;
+    Preferences        _prefs;
+#ifdef USE_M5UNIFIED
+    bool               _imuAvailable = false;
+#endif
 
     /// Blit all VirtualDisplay canvases onto the physical NeoMatrix.
     void _render();

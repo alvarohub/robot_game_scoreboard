@@ -110,81 +110,19 @@ def main():
     # if not wait_for_ready(ser, timeout_sec=5):
     #     print("No 'Ready' seen (board may already be running). Proceeding …")
 
-    #Start with a raster scan test to verify basic communication and LED control.
-    print("\n── Raster scan test ──")
-    if not raster_scan(ser, delay_ms=20):
-        print("Raster scan failed or timed out. Continuing anyway …")     
+    # ── Particle mode ─────────────────────────────────────────
+    print("\n── Particle mode (tilt the board!) ──")
+    send(ser, "/display/1/color 0 255 100")   # bright green
+    send(ser, "/display/1/mode particles")
+    print("  Running particles for 10 s — tilt the AtomS3 to move them …")
+    time.sleep(10)
 
-
-    print("\n── Setting scores ──")
-    send(ser, '/display/1/text "HELLO"')
-    time.sleep(1)
-    send(ser, "/display/1 1234")
+    # Back to text mode
+    print("\n── Back to text mode ──")
+    send(ser, "/display/1/mode text")
+    send(ser, "/display/1/color 255 255 255")
+    send(ser, '/display/1/text "DONE"')
     time.sleep(2)
-
-    # print("\n── Setting colours ──")
-    # send(ser, "/display/1/color 255 0 0")    # red
-    # send(ser, "/display/2/color 255 0 0")
-    # send(ser, "/display/3/color 0 0 255")    # blue
-    # send(ser, "/display/4/color 0 0 255")
-    # send(ser, "/display/5/color 0 255 0")    # green
-    # send(ser, "/display/6/color 0 255 0")
-    # time.sleep(2)
-
-
-    print("\n── Scroll mode test ──")
-    send(ser, "/display/1/scroll 1") # set scroll mode up
-    send(ser, "/display/1 abcd")
-    wait_scroll_done(ser, 1)
-    send(ser, "/display/1 1234")
-    wait_scroll_done(ser, 1)
-    
-    send(ser, "/display/1/scroll 2") # set scroll mode down
-    send(ser, "/display/1 Hello")
-    wait_scroll_done(ser, 1)
-    send(ser, "/display/1 You")
-    wait_scroll_done(ser, 1)
-
-    # print("\n── Brightness breathe ──")
-    # steps_per_cycle = 40        # 40 steps × 25 ms = 1 s per cycle
-    # for cycle in range(4):
-    #     for s in range(steps_per_cycle):
-    #         # sine wave 0→1→0 over one cycle
-    #         b = int(5 + 75 * (0.5 - 0.5 * math.cos(2 * math.pi * s / steps_per_cycle)))
-    #         send(ser, f"/brightness {b}")
-    #         time.sleep(0.5 / steps_per_cycle)
-
-
-    # Fire-and-forget: send many values quickly — the queue buffers them
-    # and they scroll one-by-one automatically.
-    print("\n── Scroll queue test (fire-and-forget 0→20) ──")
-    send(ser, "/display/1/scroll 1")
-    for n in range(0, 21):
-        send(ser, f"/display/1 {n}")
-    # Now just wait until the board is idle (all queued scrolls finish)
-    print("  Waiting for queue to drain …")
-    while True:
-        if not wait_scroll_done(ser, 1, timeout_sec=3.0):
-            break  # timeout = no more SCROLL_DONE coming → queue is empty
-
-    # Switch to instant mode — automatically flushes any remaining queue
-    print("\n── Instant mode (flush queue) ──")
-    send(ser, "/display/1/scroll 0")
-    time.sleep(0.5)
-
-    # Scroll countdown 9999→9980 with rainbow colours and scroll blank
-    print("\n── Scroll countdown 9999→9980 (rainbow, blank between) ──")
-    send(ser, "/display/1/scroll 2")  # scroll down
-    send(ser, "/scrollblank 1")       # blank frame between items
-    steps = list(range(9999, 9979, -1))
-    for i, n in enumerate(steps):
-        hue = i / len(steps)  # 0→1 over the countdown
-        r, g, b = [int(255 * c) for c in colorsys.hsv_to_rgb(hue, 1.0, 1.0)]
-        send(ser, f"/display/1/color {r} {g} {b}")
-        send(ser, f"/display/1 {n}")
-        time.sleep(1)
-    send(ser, "/scrollblank 0")       # restore default
-   
 
     print("\n── Clear all ──")
     send(ser, "/clearall")

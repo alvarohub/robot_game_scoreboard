@@ -1,5 +1,8 @@
 #include "DisplayManager.h"
 #include <cstring>
+#ifdef USE_M5UNIFIED
+  #include <M5Unified.h>
+#endif
 
 // Simple RGB565 pack (same as Adafruit_GFX::color565)
 static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
@@ -38,6 +41,9 @@ void DisplayManager::begin() {
     _matrix.setBrightness(DEFAULT_BRIGHTNESS);
     _matrix.fillScreen(0);
     _matrix.show();
+#ifdef USE_M5UNIFIED
+    _imuAvailable = M5.Imu.isEnabled();
+#endif
 }
 
 // ── Per-display forwarding ───────────────────────────────────
@@ -61,7 +67,23 @@ void DisplayManager::clear(uint8_t idx) {
     _vDisplays[idx]->clear();
 }
 
-// ── Scroll ───────────────────────────────────────────────────
+// ── Modes ────────────────────────────────────────────────────
+void DisplayManager::setMode(uint8_t idx, DisplayMode mode) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setMode(mode);
+}
+
+void DisplayManager::setMode(uint8_t idx, const DisplayModeConfig& config) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setMode(config);
+}
+
+void DisplayManager::setModeAll(DisplayMode mode) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setMode(mode);
+}
+
+// ── Compatibility scroll API ─────────────────────────────────
 void DisplayManager::setScrollMode(uint8_t idx, uint8_t mode) {
     if (idx >= NUM_DISPLAYS) return;
     _vDisplays[idx]->setScrollMode(mode);
@@ -82,6 +104,21 @@ void DisplayManager::setScrollBlank(bool enabled) {
         _vDisplays[i]->setScrollBlank(enabled);
 }
 
+void DisplayManager::setGravity(float gx, float gy) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setGravity(gx, gy);
+}
+
+void DisplayManager::setParticleConfig(const ParticleModeConfig& cfg) {
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++)
+        _vDisplays[i]->setParticleConfig(cfg);
+}
+
+void DisplayManager::setParticleConfig(uint8_t idx, const ParticleModeConfig& cfg) {
+    if (idx >= NUM_DISPLAYS) return;
+    _vDisplays[idx]->setParticleConfig(cfg);
+}
+
 void DisplayManager::clearQueue(uint8_t idx) {
     if (idx >= NUM_DISPLAYS) return;
     _vDisplays[idx]->clearQueue();
@@ -94,6 +131,7 @@ void DisplayManager::clearQueueAll() {
 
 // ── Global ───────────────────────────────────────────────────
 void DisplayManager::setBrightness(uint8_t brightness) {
+    _brightness = brightness;
     _matrix.setBrightness(brightness);
     _needsUpdate = true;
 }
@@ -107,6 +145,13 @@ void DisplayManager::clearAll() {
 
 // ── Per-frame update ─────────────────────────────────────────
 void DisplayManager::update() {
+#ifdef USE_M5UNIFIED
+    if (_imuAvailable && M5.Imu.update()) {
+        auto imu = M5.Imu.getImuData();
+        setGravity(imu.accel.x, -imu.accel.y);
+    }
+#endif
+
     bool anyChanged = false;
 
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
@@ -157,12 +202,12 @@ void DisplayManager::showTestPattern() {
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         char label[8];
         snprintf(label, sizeof(label), "D%d", i + 1);
-        uint8_t savedMode = _vDisplays[i]->scrollMode();
-        _vDisplays[i]->setScrollMode(SCROLL_NONE);
+        DisplayModeConfig savedConfig = _vDisplays[i]->modeConfig();
+        _vDisplays[i]->setMode(DISPLAY_MODE_TEXT);
         _vDisplays[i]->setColor(colors[i % 6]);
         _vDisplays[i]->setText(label);
         update();
-        _vDisplays[i]->setScrollMode(savedMode);
+        _vDisplays[i]->setMode(savedConfig);
         delay(300);
     }
 
@@ -196,16 +241,95 @@ void DisplayManager::showRasterScan(uint16_t delayMs) {
 void DisplayManager::startDisplay(unsigned long durationMs) {
     uint16_t cyan = rgb565(0, 255, 255);
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
-        uint8_t savedMode = _vDisplays[i]->scrollMode();
-        _vDisplays[i]->setScrollMode(SCROLL_DOWN);
+        DisplayModeConfig savedConfig = _vDisplays[i]->modeConfig();
+        _vDisplays[i]->setMode(DISPLAY_MODE_SCROLL_DOWN);
         _vDisplays[i]->setColor(cyan);
         _vDisplays[i]->setText("GAME");
-        _vDisplays[i]->setScrollMode(savedMode);
+        _vDisplays[i]->setMode(savedConfig);
     }
     update();
     delay(durationMs);
     clearAll();
     update();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NVS save / load — persists key display parameters
+// ══════════════════════════════════════════════════════════════
+
+void DisplayManager::saveParams() {
+    _prefs.begin("disp", false);           // read-write
+    _prefs.putUChar("bright", _brightness);
+
+    // Save per-display state (only display 0 for now = NUM_DISPLAYS=1)
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        VirtualDisplay* vd = _vDisplays[i];
+        const DisplayModeConfig& mc = vd->modeConfig();
+        char key[16];
+
+        snprintf(key, sizeof(key), "mode%d", i);
+        _prefs.putUChar(key, (uint8_t)mc.mode);
+
+        snprintf(key, sizeof(key), "color%d", i);
+        _prefs.putUShort(key, vd->color());
+
+        // Particle config — store as raw bytes
+        snprintf(key, sizeof(key), "pcfg%d", i);
+        const ParticleModeConfig& p = mc.particles;
+        _prefs.putBytes(key, &p, sizeof(ParticleModeConfig));
+
+        snprintf(key, sizeof(key), "sms%d", i);
+        _prefs.putUChar(key, mc.scrollStepMs);
+
+        snprintf(key, sizeof(key), "sblk%d", i);
+        _prefs.putBool(key, mc.scrollBlank);
+    }
+
+    _prefs.putBool("valid", true);
+    _prefs.end();
+    Serial.println("Params saved to NVS");
+}
+
+void DisplayManager::loadParams() {
+    _prefs.begin("disp", true);            // read-only
+    if (!_prefs.getBool("valid", false)) {
+        _prefs.end();
+        Serial.println("No saved params in NVS");
+        return;
+    }
+
+    setBrightness(_prefs.getUChar("bright", DEFAULT_BRIGHTNESS));
+
+    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        VirtualDisplay* vd = _vDisplays[i];
+        char key[16];
+
+        snprintf(key, sizeof(key), "color%d", i);
+        vd->setColor(_prefs.getUShort(key, 0xFFFF));
+
+        // Read particle config
+        snprintf(key, sizeof(key), "pcfg%d", i);
+        ParticleModeConfig pcfg;
+        if (_prefs.getBytes(key, &pcfg, sizeof(ParticleModeConfig)) == sizeof(ParticleModeConfig)) {
+            // loaded OK
+        }
+
+        DisplayModeConfig mc;
+        snprintf(key, sizeof(key), "mode%d", i);
+        mc.mode = (DisplayMode)_prefs.getUChar(key, (uint8_t)DISPLAY_MODE_TEXT);
+
+        snprintf(key, sizeof(key), "sms%d", i);
+        mc.scrollStepMs = _prefs.getUChar(key, SCROLL_STEP_MS);
+
+        snprintf(key, sizeof(key), "sblk%d", i);
+        mc.scrollBlank = _prefs.getBool(key, false);
+
+        mc.particles = pcfg;
+        vd->setMode(mc);
+    }
+
+    _prefs.end();
+    Serial.println("Params loaded from NVS");
 }
 
 // ══════════════════════════════════════════════════════════════
