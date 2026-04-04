@@ -73,6 +73,11 @@ void OSCHandler::update() {
     }
 }
 
+// ── Execute a command string (reuses the serial-line parser) ─
+void OSCHandler::executeCommand(const char* line) {
+    _handleSerialLine(line);
+}
+
 // ── Resolve our IP ───────────────────────────────────────────
 IPAddress OSCHandler::localIP() {
 #ifdef USE_WIFI
@@ -570,21 +575,21 @@ void OSCHandler::processRS485() {
 
 #endif  // USE_RS485
 
-// ── Shared text-line command parser (used by USB Serial & RS485) ──
-#if SERIAL_CMD_ENABLED || defined(USE_RS485)
+// ── Shared text-line command parser (used by USB Serial, RS485 & Web) ──
 
 #ifdef USE_M5UNIFIED
 static void _lcdSerialDebug(const char* line) {
-    M5.Display.fillScreen(TFT_BLACK);
-    M5.Display.setTextColor(TFT_GREEN, TFT_BLACK);
-    M5.Display.setTextSize(2);          // 12×16 px — readable on 128×128
-    M5.Display.setTextDatum(TL_DATUM);  // top-left
-    M5.Display.drawString("Serial rx:", 2, 2);
-    // Show the received command (wraps on 128px-wide screen)
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.setTextWrap(true);
-    M5.Display.setCursor(2, 24);
-    M5.Display.print(line);
+    // Show received command at the bottom of the LCD (non-destructive)
+    int16_t h = M5.Display.height();
+    M5.Display.fillRect(0, h - 12, M5.Display.width(), 12, TFT_BLACK);
+    M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
+    M5.Display.setTextSize(1);
+    M5.Display.setTextDatum(BC_DATUM);  // bottom-centre
+    // Truncate to fit screen width (~21 chars at size 1)
+    char buf[22];
+    strncpy(buf, line, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    M5.Display.drawString(buf, M5.Display.width() / 2, h - 1);
 }
 #endif
 
@@ -681,5 +686,3 @@ void OSCHandler::_handleSerialLine(const char* line) {
 
     _processMessage(msg);
 }
-
-#endif  // SERIAL_CMD_ENABLED || USE_RS485

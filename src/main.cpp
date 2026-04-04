@@ -13,15 +13,22 @@
 #include "DisplayManager.h"
 #include "OSCHandler.h"
 
+#ifdef USE_WIFI
+  #include "WebInterface.h"
+#endif
+
 #ifdef USE_M5UNIFIED
   #include <M5Unified.h>
 #endif
 
 DisplayManager displayManager;
 OSCHandler     osc(displayManager);
+#ifdef USE_WIFI
+WebInterface   webUI(osc);
+#endif
 bool           networkUp = false;
 
-// ── Helper: show a status line on the AtomS3 built-in LCD ────
+// ── Helper: show status on the AtomS3 built-in LCD ───────────
 #ifdef USE_M5UNIFIED
 static void lcdStatus(const char* line1, const char* line2 = nullptr,
                       uint32_t color = TFT_WHITE) {
@@ -33,9 +40,74 @@ static void lcdStatus(const char* line1, const char* line2 = nullptr,
                           line2 ? M5.Display.height() / 2 - 14
                                 : M5.Display.height() / 2);
     if (line2) {
-        M5.Display.setTextSize(1);   
+        M5.Display.setTextSize(1);
         M5.Display.drawString(line2, M5.Display.width() / 2,
                               M5.Display.height() / 2 + 14);
+    }
+}
+
+/// Show AP info (SSID + IP) on the top, and optional small status at bottom.
+static void lcdShowAP(const char* ssid, const char* ip) {
+    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.setTextDatum(MC_DATUM);
+    // SSID
+    M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(ssid, M5.Display.width() / 2, 24);
+    // IP
+    M5.Display.setTextColor(TFT_GREEN, TFT_BLACK);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(ip, M5.Display.width() / 2, 52);
+    // Hint
+    M5.Display.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("tap to stop AP", M5.Display.width() / 2, 78);
+}
+
+/// Show "AP off" idle screen.
+static void lcdShowIdle() {
+    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("Scoreboard", M5.Display.width() / 2, M5.Display.height() / 2 - 10);
+    M5.Display.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("tap to start AP", M5.Display.width() / 2, M5.Display.height() / 2 + 16);
+}
+
+/// Show small data line at the very bottom of the LCD.
+static void lcdBottomLine(const char* text) {
+    // Clear only the bottom strip
+    M5.Display.fillRect(0, M5.Display.height() - 12, M5.Display.width(), 12, TFT_BLACK);
+    M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
+    M5.Display.setTextSize(1);
+    M5.Display.setTextDatum(BC_DATUM);  // bottom-centre
+    M5.Display.drawString(text, M5.Display.width() / 2, M5.Display.height() - 1);
+}
+#endif
+
+// ── AP toggle ────────────────────────────────────────────────
+#ifdef USE_WIFI
+static void toggleAP() {
+    if (webUI.isRunning()) {
+        webUI.stopAP();
+#ifdef USE_M5UNIFIED
+        lcdShowIdle();
+#endif
+        // Re-establish STA WiFi for OSC
+        if (osc.begin()) {
+            networkUp = true;
+            Serial.printf("WiFi STA reconnected — IP %s\n", osc.localIP().toString().c_str());
+        }
+    } else {
+        // Disconnect STA WiFi before starting AP
+        WiFi.disconnect(true);
+        networkUp = false;
+        IPAddress ip = webUI.startAP();
+#ifdef USE_M5UNIFIED
+        lcdShowAP(webUI.ssid(), ip.toString().c_str());
+#endif
     }
 }
 #endif
@@ -106,14 +178,27 @@ void setup() {
     Serial.println(networkUp
         ? "Ready — waiting for OSC messages + serial commands …"
         : "Ready — serial-only mode (no network) …");
+    Serial.println("Tap AtomS3 button to toggle WiFi AP + web UI");
+#ifdef USE_M5UNIFIED
+    lcdShowIdle();
+#endif
 }
 
 // ── Loop ─────────────────────────────────────────────────────
 void loop() {
 #ifdef USE_M5UNIFIED
     M5.update();         // poll button, etc.
+    // Button A (screen tap on AtomS3) toggles AP on/off
+#ifdef USE_WIFI
+    if (M5.BtnA.wasPressed()) {
+        toggleAP();
+    }
+#endif
 #endif
     if (networkUp) osc.update();  // read & dispatch incoming OSC packets
+#ifdef USE_WIFI
+    webUI.update();               // handle web clients (no-op when AP is off)
+#endif
 #if SERIAL_CMD_ENABLED
     osc.processSerial(); // read & dispatch serial text commands
 #endif

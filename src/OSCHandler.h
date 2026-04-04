@@ -28,6 +28,10 @@ public:
     /// Call every loop() — processes all pending UDP packets.
     void update();
 
+    /// Execute a text command (same syntax as serial: "/address arg1 arg2").
+    /// Used by the web interface to reuse the serial parser.
+    void executeCommand(const char* line);
+
 #if SERIAL_CMD_ENABLED
     /// Call every loop() — reads serial lines and executes them
     /// as if they were OSC messages.
@@ -66,7 +70,5 @@ private:
     uint8_t _rs485Pos = 0;
 #endif
 
-#if SERIAL_CMD_ENABLED || defined(USE_RS485)
     void _handleSerialLine(const char* line);
-#endif
 };
