@@ -25,7 +25,7 @@ void ParticleSystem::init(float boundsW, float boundsH, uint16_t defaultColor) {
     float dx     = (cols > 1) ? (spanX / (cols - 1)) : 0.0f;
     float dy     = (rows > 1) ? (spanY / (rows - 1)) : 0.0f;
 
-    for (uint8_t i = 0; i < _count; i++) {
+    for (uint16_t i = 0; i < _count; i++) {
         uint8_t col = i % cols;
         uint8_t row = i / cols;
 
@@ -43,6 +43,25 @@ void ParticleSystem::init(float boundsW, float boundsH, uint16_t defaultColor) {
     _initialised = true;
 }
 
+void ParticleSystem::initFromPositions(const Vec2f* positions, uint16_t count,
+                                       float boundsW, float boundsH,
+                                       float radius, uint16_t color) {
+    _boundsW = boundsW;
+    _boundsH = boundsH;
+    _count   = count;
+    if (_count > MAX_PARTICLES) _count = MAX_PARTICLES;
+
+    for (uint16_t i = 0; i < _count; i++) {
+        Particle& p = _particles[i];
+        p.pos    = positions[i];
+        p.vel    = Vec2f{0, 0};
+        p.accel  = Vec2f{0, 0};
+        p.radius = radius;
+        p.color  = color;
+    }
+    _initialised = true;
+}
+
 // ── Configuration ────────────────────────────────────────────
 
 void ParticleSystem::setConfig(const ParticleSystemConfig& cfg) {
@@ -53,7 +72,7 @@ void ParticleSystem::setConfig(const ParticleSystemConfig& cfg) {
     if (_config.count > MAX_PARTICLES) _config.count = MAX_PARTICLES;
 
     // Update radii on live particles
-    for (uint8_t i = 0; i < _count; i++) {
+    for (uint16_t i = 0; i < _count; i++) {
         _particles[i].radius = _config.radius;
     }
 
@@ -97,12 +116,12 @@ void ParticleSystem::_substep(float dt) {
 
 void ParticleSystem::_applyGravity() {
     if (!_config.gravityEnabled) {
-        for (uint8_t i = 0; i < _count; i++)
+        for (uint16_t i = 0; i < _count; i++)
             _particles[i].accel = Vec2f{0, 0};
         return;
     }
     Vec2f g = _gravity * _config.gravityScale;
-    for (uint8_t i = 0; i < _count; i++) {
+    for (uint16_t i = 0; i < _count; i++) {
         _particles[i].accel = g;
     }
 }
@@ -111,7 +130,7 @@ void ParticleSystem::_integrate(float dt) {
     // Velocity Verlet: pos += v*dt + ½a*dt²; v += a*dt
     float halfDt2 = 0.5f * dt * dt;
 
-    for (uint8_t i = 0; i < _count; i++) {
+    for (uint16_t i = 0; i < _count; i++) {
         Particle& p = _particles[i];
         p.pos += p.vel * dt + p.accel * halfDt2;
         p.vel += p.accel * dt;
@@ -129,7 +148,7 @@ void ParticleSystem::_integrate(float dt) {
 }
 
 void ParticleSystem::_constrainWalls() {
-    for (uint8_t i = 0; i < _count; i++) {
+    for (uint16_t i = 0; i < _count; i++) {
         Particle& p = _particles[i];
         float minX = p.radius;
         float maxX = _boundsW - 1.0f - p.radius;
@@ -159,8 +178,8 @@ void ParticleSystem::_resolveCollisions() {
     // Interaction range for attraction (in absolute pixels)
     bool doAttract = (_config.attractStrength > 0.0f);
 
-    for (uint8_t i = 0; i < _count; i++) {
-        for (uint8_t j = i + 1; j < _count; j++) {
+    for (uint16_t i = 0; i < _count; i++) {
+        for (uint16_t j = i + 1; j < _count; j++) {
             Particle& a = _particles[i];
             Particle& b = _particles[j];
 

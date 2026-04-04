@@ -14,7 +14,7 @@
 // ── Configuration ────────────────────────────────────────────
 
 struct ParticleSystemConfig {
-    uint8_t count        = 6;
+    uint16_t count       = 6;
     uint8_t renderMs     = 20;     // canvas redraw interval (cosmetic)
     uint8_t substepMs    = 20;     // max physics sub-step (stability vs CPU)
     float   radius       = 0.45f;  // collision & rendering radius (pixels)
@@ -42,13 +42,20 @@ struct Particle {
 
 class ParticleSystem {
 public:
-    static constexpr uint8_t MAX_PARTICLES = 64;
+    static constexpr uint16_t MAX_PARTICLES = 256;
 
     ParticleSystem() = default;
 
     // ── Setup ────────────────────────────────────────────────
     /// Initialise particles in a grid within the given bounds.
     void init(float boundsW, float boundsH, uint16_t defaultColor);
+
+    /// Initialise from explicit positions (for text-to-particles etc.).
+    /// Positions array must have `count` entries.  Velocities start at zero.
+    void initFromPositions(const Vec2f* positions, uint16_t count,
+                           float boundsW, float boundsH,
+                           float radius, uint16_t color);
+
     bool isInitialised() const { return _initialised; }
     void reset() { _initialised = false; }
 
@@ -65,9 +72,9 @@ public:
     void step(float dt);
 
     // ── Particle access (for rendering) ──────────────────────
-    uint8_t        count()                  const { return _count; }
-    const Particle& particle(uint8_t i)     const { return _particles[i]; }
-    Particle&       particle(uint8_t i)           { return _particles[i]; }
+    uint16_t       count()                  const { return _count; }
+    const Particle& particle(uint16_t i)    const { return _particles[i]; }
+    Particle&       particle(uint16_t i)          { return _particles[i]; }
 
     /// Bounds used by the system
     float boundsW() const { return _boundsW; }
@@ -76,7 +83,7 @@ public:
 private:
     ParticleSystemConfig _config;
     Particle _particles[MAX_PARTICLES];
-    uint8_t  _count = 0;
+    uint16_t _count = 0;
     bool     _initialised = false;
 
     // World

@@ -474,6 +474,8 @@ void DisplayManager::loadParams() {
 void DisplayManager::_render() {
     _matrix.fillScreen(0);
 
+    uint16_t stripIdx = 0;   // continuous index across ALL displays
+
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         const uint16_t* buf = _vDisplays[i]->getBuffer();
         if (!buf) continue;
@@ -488,10 +490,10 @@ void DisplayManager::_render() {
         // can't be displayed anyway.  Every subsequent pixel lands on
         // the correct physical LED because the skip keeps strip and
         // canvas indices in sync.
-        uint16_t stripIdx = 0;
         for (uint16_t px = 0; px < totalPixels; px++) {
 #if DEAD_LED_INDEX >= 0
-            if (px == (uint16_t)DEAD_LED_INDEX)
+            uint16_t globalPx = (uint16_t)(i * totalPixels) + px;
+            if (globalPx == (uint16_t)DEAD_LED_INDEX)
                 continue;           // dead LED's pixel — nothing to show
 #endif
             uint16_t c565 = buf[px];

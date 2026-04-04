@@ -21,6 +21,42 @@
   #define SCROLL_QUEUE_SIZE 10
 #endif
 
+#include "Vec2f.h"
+
+// ── 2D view transform (applied at render time, like OpenGL modelview) ─────
+struct ParticleTransform2D {
+    float angle    = 0.0f;   // rotation in radians (around pivot)
+    float scaleX   = 1.0f;   // horizontal scale
+    float scaleY   = 1.0f;   // vertical scale
+    float tx       = 0.0f;   // translation X (pixels, post-rotation)
+    float ty       = 0.0f;   // translation Y (pixels, post-rotation)
+
+    bool isIdentity() const {
+        return angle == 0.0f && scaleX == 1.0f && scaleY == 1.0f
+            && tx == 0.0f && ty == 0.0f;
+    }
+
+    /// Transform a position around a given pivot (typically display centre).
+    Vec2f apply(Vec2f pos, float pivotX, float pivotY) const {
+        float dx = pos.x - pivotX;
+        float dy = pos.y - pivotY;
+        // Scale
+        dx *= scaleX;
+        dy *= scaleY;
+        // Rotate
+        if (angle != 0.0f) {
+            float c = cosf(angle);
+            float s = sinf(angle);
+            float rx = dx * c - dy * s;
+            float ry = dx * s + dy * c;
+            dx = rx;
+            dy = ry;
+        }
+        // Translate back + offset
+        return Vec2f(dx + pivotX + tx, dy + pivotY + ty);
+    }
+};
+
 enum DisplayMode : uint8_t {
     DISPLAY_MODE_TEXT = 0,
     DISPLAY_MODE_SCROLL_UP,
@@ -54,6 +90,10 @@ struct ParticleModeConfig {
     float       glowSigma      = 1.2f;   // Gaussian envelope sigma (pixels)
     float       glowWavelength = 0.0f;   // interference wavelength (0 = pure glow, >0 = wave)
     bool        speedColor     = false;  // colour from velocity (heat-map)
+    bool        physicsPaused  = false;  // freeze physics, keep rendering
+
+    // View transform (modelview — render-time only, physics untouched)
+    ParticleTransform2D viewTransform;
 
     uint8_t textIndex = 0;  // which textStack entry to use for RENDER_TEXT
 
@@ -148,6 +188,23 @@ public:
     void setScrollContinuous(bool enabled);
     void setGravity(float gx, float gy);
     void setParticleConfig(const ParticleModeConfig& cfg);
+
+    /// Convert current text into particles: render text to canvas, scan lit
+    /// pixels, create a particle at each one.  Disables text layer, enables
+    /// particles with physics paused + glow.  Returns number of particles.
+    uint16_t textToParticles();
+
+    /// Set physics paused flag (freeze/unfreeze dynamics).
+    void setPhysicsPaused(bool paused);
+    bool physicsPaused() const { return _modeConfig.particles.physicsPaused; }
+
+    /// View transform (modelview matrix — render-time only)
+    void setParticleTransform(const ParticleTransform2D& t);
+    void setParticleRotation(float angleDeg);
+    void setParticleScale(float sx, float sy);
+    void setParticleTranslation(float tx, float ty);
+    void resetParticleTransform();
+    const ParticleTransform2D& particleTransform() const { return _modeConfig.particles.viewTransform; }
 
     // ── Scroll queue ────────────────────────────────────────────
     void clearQueue();

@@ -22,7 +22,7 @@
   #define NEOPIXEL_PIN 2           // GPIO for NeoPixel data line
 #endif
 
-#define NUM_DISPLAYS        1      // logical score displays
+#define NUM_DISPLAYS        6      // logical score displays
 #define MATRIX_TILE_WIDTH   32      // pixels per tile (width)
 #define MATRIX_TILE_HEIGHT  8      // pixels per tile (height)
 #define TOTAL_WIDTH  (NUM_DISPLAYS * MATRIX_TILE_WIDTH)

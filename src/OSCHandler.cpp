@@ -113,6 +113,13 @@ IPAddress OSCHandler::localIP() {
 //    /display/<N>/text/set     — set text stack entry at index (int, string)
 //    /display/<N>/text/clear   — clear text stack
 //    /display/<N>/text/list    — print text stack to serial
+//    /display/<N>/text2particles — convert rendered text to frozen particles
+//    /display/<N>/particles/pause — pause/resume physics: 0=run, 1=pause
+//    /display/<N>/particles/transform — view transform: angleDeg scaleX scaleY tx ty
+//    /display/<N>/particles/rotate   — rotation only (float degrees)
+//    /display/<N>/particles/scale    — scale only (float sx [sy])
+//    /display/<N>/particles/translate — translate only (float tx ty)
+//    /display/<N>/particles/resettransform — reset view to identity
 //    /brightness               — global brightness (int arg 0-255)
 //    /mode                     — set mode for ALL displays (int 0-2)
 //    /text/enable              — text layer on all displays: 0=off, 1=on
@@ -128,6 +135,12 @@ IPAddress OSCHandler::localIP() {
 //    /text/set N "STR"         — set text stack entry N (all displays)
 //    /text/clear               — clear text stack (all displays)
 //    /text/list                — print text stacks to serial
+//    /text2particles           — text-to-particles on all displays
+//    /particles/pause          — pause/resume physics (all displays): 0/1
+//    /particles/rotate         — rotation (all, float degrees)
+//    /particles/scale          — scale (all, float sx [sy])
+//    /particles/translate      — translate (all, float tx ty)
+//    /particles/resettransform — reset all view transforms
 //    /defaults                 — reset all params to compiled defaults
 //    /clearqueue               — discard scroll queues on all displays
 //    /clearall  or  /clear     — clear every display (also flushes queues)
@@ -336,6 +349,79 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 }
             }
         }
+        // ── /display/<N>/text2particles — convert text to frozen particles ─
+        else if (strcmp(subCmd, "text2particles") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->textToParticles();
+                Serial.printf("D%d text→particles\n", displayNum);
+            }
+        }
+        // ── /display/<N>/particles/pause — pause/resume physics ─
+        else if (strcmp(subCmd, "particles/pause") == 0) {
+            if (msg.isInt(0)) {
+                VirtualDisplay* vd = _display.getDisplay(idx);
+                if (vd) {
+                    vd->setPhysicsPaused(msg.getInt(0) != 0);
+                    Serial.printf("D%d physics %s\n", displayNum, msg.getInt(0) ? "PAUSED" : "RUNNING");
+                }
+            }
+        }
+        // ── /display/<N>/particles/transform — set view transform ─
+        //   args: angleDeg scaleX scaleY tx ty  (all float, all optional)
+        else if (strcmp(subCmd, "particles/transform") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                ParticleTransform2D t = vd->particleTransform();
+                if (msg.size() >= 1 && msg.isFloat(0)) vd->setParticleRotation(msg.getFloat(0));
+                if (msg.size() >= 3 && msg.isFloat(1) && msg.isFloat(2))
+                    vd->setParticleScale(msg.getFloat(1), msg.getFloat(2));
+                if (msg.size() >= 5 && msg.isFloat(3) && msg.isFloat(4))
+                    vd->setParticleTranslation(msg.getFloat(3), msg.getFloat(4));
+                Serial.printf("D%d transform: rot=%.1f° s=(%.2f,%.2f) t=(%.1f,%.1f)\n",
+                              displayNum, msg.size() >= 1 ? msg.getFloat(0) : 0.0f,
+                              vd->particleTransform().scaleX, vd->particleTransform().scaleY,
+                              vd->particleTransform().tx, vd->particleTransform().ty);
+            }
+        }
+        // ── /display/<N>/particles/rotate — set rotation only ─
+        else if (strcmp(subCmd, "particles/rotate") == 0) {
+            if (msg.isFloat(0)) {
+                VirtualDisplay* vd = _display.getDisplay(idx);
+                if (vd) {
+                    vd->setParticleRotation(msg.getFloat(0));
+                    Serial.printf("D%d rotate %.1f°\n", displayNum, msg.getFloat(0));
+                }
+            }
+        }
+        // ── /display/<N>/particles/scale — set scale only ─
+        else if (strcmp(subCmd, "particles/scale") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                float sx = msg.isFloat(0) ? msg.getFloat(0) : 1.0f;
+                float sy = (msg.size() >= 2 && msg.isFloat(1)) ? msg.getFloat(1) : sx;
+                vd->setParticleScale(sx, sy);
+                Serial.printf("D%d scale (%.2f, %.2f)\n", displayNum, sx, sy);
+            }
+        }
+        // ── /display/<N>/particles/translate — set translation only ─
+        else if (strcmp(subCmd, "particles/translate") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                float tx = msg.isFloat(0) ? msg.getFloat(0) : 0.0f;
+                float ty = (msg.size() >= 2 && msg.isFloat(1)) ? msg.getFloat(1) : 0.0f;
+                vd->setParticleTranslation(tx, ty);
+                Serial.printf("D%d translate (%.1f, %.1f)\n", displayNum, tx, ty);
+            }
+        }
+        // ── /display/<N>/particles/resettransform — reset to identity ─
+        else if (strcmp(subCmd, "particles/resettransform") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->resetParticleTransform();
+                Serial.printf("D%d transform reset\n", displayNum);
+            }
+        }
     }
     // ── /brightness ──────────────────────────────────────────
     else if (strcmp(address, "/brightness") == 0) {
@@ -461,6 +547,64 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 Serial.printf("  [%d] \"%s\"\n", j, vd->textGet(j));
             }
         }
+    }
+    // ── /text2particles — convert text to frozen particles (all) ─
+    else if (strcmp(address, "/text2particles") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->textToParticles();
+        }
+        Serial.println("All text→particles");
+    }
+    // ── /particles/pause — pause/resume physics (all) ────────
+    else if (strcmp(address, "/particles/pause") == 0) {
+        if (msg.isInt(0)) {
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->setPhysicsPaused(msg.getInt(0) != 0);
+            }
+            Serial.printf("All physics %s\n", msg.getInt(0) ? "PAUSED" : "RUNNING");
+        }
+    }
+    // ── /particles/rotate — rotate all (degrees) ─────────────
+    else if (strcmp(address, "/particles/rotate") == 0) {
+        if (msg.isFloat(0)) {
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->setParticleRotation(msg.getFloat(0));
+            }
+            Serial.printf("All rotate %.1f°\n", msg.getFloat(0));
+        }
+    }
+    // ── /particles/scale — scale all ─────────────────────────
+    else if (strcmp(address, "/particles/scale") == 0) {
+        if (msg.isFloat(0)) {
+            float sx = msg.getFloat(0);
+            float sy = (msg.size() >= 2 && msg.isFloat(1)) ? msg.getFloat(1) : sx;
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->setParticleScale(sx, sy);
+            }
+            Serial.printf("All scale (%.2f, %.2f)\n", sx, sy);
+        }
+    }
+    // ── /particles/translate — translate all ──────────────────
+    else if (strcmp(address, "/particles/translate") == 0) {
+        float tx = msg.isFloat(0) ? msg.getFloat(0) : 0.0f;
+        float ty = (msg.size() >= 2 && msg.isFloat(1)) ? msg.getFloat(1) : 0.0f;
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->setParticleTranslation(tx, ty);
+        }
+        Serial.printf("All translate (%.1f, %.1f)\n", tx, ty);
+    }
+    // ── /particles/resettransform — reset all transforms ─────
+    else if (strcmp(address, "/particles/resettransform") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->resetParticleTransform();
+        }
+        Serial.println("All transforms reset");
     }
     // ── /defaults — reset all params to compiled defaults ────
     else if (strcmp(address, "/defaults") == 0) {

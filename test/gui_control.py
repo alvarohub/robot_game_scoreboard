@@ -54,11 +54,19 @@ class ScoreboardGUI:
         self._stop_reader = threading.Event()
         self._write_queue = queue.Queue()
         self._throttle_id = None  # after-id for debounced slider send
+        self._loading = False     # guard: suppress serial sends during state restore
 
         # Current colour (R, G, B)
         self._color = (255, 255, 255)
 
+        # Per-display state tracking (display numbers are 1-based)
+        self._current_display = 1
+        self._display_states = {n: self._default_display_state() for n in range(1, 7)}
+
         self._build_ui(initial_port)
+
+        # Track display changes
+        self._display_var.trace_add("write", self._on_display_change)
 
     # ── UI construction ───────────────────────────────────────
 
@@ -96,8 +104,18 @@ class ScoreboardGUI:
             row=0, column=1, sticky="w", **pad
         )
 
+        # ── Two-column layout ────────────────────────────────
+        mid = ttk.Frame(self.root)
+        mid.pack(fill="both", **pad)
+        left_col = ttk.Frame(mid)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
+        right_col = ttk.Frame(mid)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
+        mid.columnconfigure(0, weight=1)
+        mid.columnconfigure(1, weight=1)
+
         # ── Layers & Mode frame ──────────────────────────────
-        mode_f = ttk.LabelFrame(self.root, text="Layers & Mode")
+        mode_f = ttk.LabelFrame(left_col, text="Layers & Mode")
         mode_f.pack(fill="x", **pad)
 
         # Row 0: Text layer enable + text mode selection
@@ -124,13 +142,13 @@ class ScoreboardGUI:
         self._text_bright_label.grid(row=1, column=3, **pad)
 
         # ── Text / Stack frame ─────────────────────────────────
-        text_f = ttk.LabelFrame(self.root, text="Text / Stack")
+        text_f = ttk.LabelFrame(left_col, text="Text / Stack")
         text_f.pack(fill="x", **pad)
 
         self._text_var = tk.StringVar()
         text_entry = ttk.Entry(text_f, textvariable=self._text_var, width=16)
         text_entry.grid(row=0, column=0, **pad)
-        text_entry.bind("<Return>", lambda e: self._send_text())
+        text_entry.bind("<Return>", lambda e: (self._send_text(), self.root.focus_set()))
         ttk.Button(text_f, text="Send", command=self._send_text).grid(row=0, column=1, **pad)
         ttk.Button(text_f, text="Push", command=self._ts_push).grid(row=0, column=2, **pad)
         ttk.Button(text_f, text="Pop", command=self._ts_pop).grid(row=0, column=3, **pad)
@@ -148,7 +166,7 @@ class ScoreboardGUI:
         text_f.columnconfigure(1, weight=1)
 
         # ── Text colour frame ─────────────────────────────────
-        color_f = ttk.LabelFrame(self.root, text="Text Colour")
+        color_f = ttk.LabelFrame(left_col, text="Text Colour")
         color_f.pack(fill="x", **pad)
 
         self._color_preview = tk.Canvas(color_f, width=30, height=30,
@@ -170,7 +188,7 @@ class ScoreboardGUI:
             s.grid(row=0, column=3 + i * 2, **pad)
 
         # ── Brightness frame ─────────────────────────────────
-        bright_f = ttk.LabelFrame(self.root, text="Brightness")
+        bright_f = ttk.LabelFrame(left_col, text="Brightness")
         bright_f.pack(fill="x", **pad)
 
         self._brightness_var = tk.IntVar(value=10)
@@ -185,7 +203,7 @@ class ScoreboardGUI:
         self._bright_label.grid(row=0, column=3, **pad)
 
         # ── Scroll speed frame ───────────────────────────────
-        scroll_f = ttk.LabelFrame(self.root, text="Scroll Settings")
+        scroll_f = ttk.LabelFrame(left_col, text="Scroll Settings")
         scroll_f.pack(fill="x", **pad)
 
         ttk.Label(scroll_f, text="Speed (ms/px):").grid(row=0, column=0, **pad)
@@ -197,7 +215,7 @@ class ScoreboardGUI:
         self._scrollspeed_label.grid(row=0, column=2, **pad)
 
         # ── Particle settings frame ──────────────────────────
-        part_f = ttk.LabelFrame(self.root, text="Particle Settings")
+        part_f = ttk.LabelFrame(right_col, text="Particle Settings")
         part_f.pack(fill="x", **pad)
 
         # Enable checkbox (particles as overlay, independent of text mode)
@@ -334,8 +352,51 @@ class ScoreboardGUI:
         ttk.Scale(part_f, from_=1.5, to=8.0, variable=self._pattrange_var,
                   orient="horizontal", length=100,
                   command=lambda *_: self._send_particle_config()).grid(row=7, column=4, **pad)
+
+        # Row 8: Text→Particles + Clear Particles + Pause Physics
+        ttk.Button(part_f, text="Text → Particles",
+                   command=self._text_to_particles).grid(row=8, column=0, columnspan=2, **pad)
+        ttk.Button(part_f, text="Clear Particles",
+                   command=self._clear_particles).grid(row=8, column=2, **pad)
+        self._physics_paused = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Pause Physics", variable=self._physics_paused,
+                        command=self._toggle_physics_pause).grid(row=8, column=3, columnspan=2, sticky="w", **pad)
+
+        # Row 9: View transform — rotation + scale
+        ttk.Label(part_f, text="Rotate°:").grid(row=9, column=0, **pad)
+        self._protate_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=-180.0, to=180.0, variable=self._protate_var,
+                  orient="horizontal", length=120,
+                  command=lambda *_: self._send_transform()).grid(row=9, column=1, **pad)
+        self._protate_label = ttk.Label(part_f, text="0.0")
+        self._protate_label.grid(row=9, column=2, **pad)
+
+        ttk.Label(part_f, text="Scale:").grid(row=9, column=3, **pad)
+        self._pscale_var = tk.DoubleVar(value=1.0)
+        ttk.Scale(part_f, from_=0.1, to=4.0, variable=self._pscale_var,
+                  orient="horizontal", length=120,
+                  command=lambda *_: self._send_transform()).grid(row=9, column=4, **pad)
+        self._pscale_label = ttk.Label(part_f, text="1.0")
+        self._pscale_label.grid(row=9, column=5, **pad)
+
+        # Row 10: View transform — translate X/Y + reset
+        ttk.Label(part_f, text="Tx:").grid(row=10, column=0, **pad)
+        self._ptx_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=-16.0, to=16.0, variable=self._ptx_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_transform()).grid(row=10, column=1, **pad)
+
+        ttk.Label(part_f, text="Ty:").grid(row=10, column=2, **pad)
+        self._pty_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=-8.0, to=8.0, variable=self._pty_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_transform()).grid(row=10, column=3, **pad)
+
+        ttk.Button(part_f, text="Reset Transform",
+                   command=self._reset_transform).grid(row=10, column=4, **pad)
+
         # ── Actions frame ────────────────────────────────────
-        act_f = ttk.LabelFrame(self.root, text="Actions")
+        act_f = ttk.LabelFrame(left_col, text="Actions")
         act_f.pack(fill="x", **pad)
 
         ttk.Button(act_f, text="Clear Display", command=self._clear_display).grid(
@@ -352,7 +413,7 @@ class ScoreboardGUI:
         )
 
         # ── Presets frame (JSON save/load + ESP32 NVS) ────────
-        preset_f = ttk.LabelFrame(self.root, text="Presets")
+        preset_f = ttk.LabelFrame(left_col, text="Presets")
         preset_f.pack(fill="x", **pad)
 
         ttk.Button(preset_f, text="Save to JSON…", command=self._save_preset).grid(
@@ -376,7 +437,7 @@ class ScoreboardGUI:
         self._raw_var = tk.StringVar()
         raw_entry = ttk.Entry(raw_f, textvariable=self._raw_var, width=40)
         raw_entry.grid(row=0, column=0, **pad)
-        raw_entry.bind("<Return>", lambda e: self._send_raw())
+        raw_entry.bind("<Return>", lambda e: (self._send_raw(), self.root.focus_set()))
         ttk.Button(raw_f, text="Send", command=self._send_raw).grid(row=0, column=1, **pad)
 
         # ── Log frame ────────────────────────────────────────
@@ -433,6 +494,13 @@ class ScoreboardGUI:
                     line = self.ser.readline().decode("utf-8", errors="replace").rstrip()
                     if line:
                         self.root.after(0, self._log_msg, f"[fw] {line}")
+                        # Parse TEXT2PARTICLES response to sync GUI count
+                        if line.startswith("TEXT2PARTICLES "):
+                            try:
+                                n = int(line.split()[1])
+                                self.root.after(0, self._on_text2particles_count, n)
+                            except (IndexError, ValueError):
+                                pass
                 else:
                     time.sleep(0.02)  # avoid busy-loop when idle
             except Exception:
@@ -452,6 +520,151 @@ class ScoreboardGUI:
 
     # ── Commands ──────────────────────────────────────────────
 
+    # ── Per-display state management ─────────────────────────
+
+    @staticmethod
+    def _default_display_state():
+        return {
+            "textEnabled": True,
+            "mode": "text",
+            "textBrightness": 255,
+            "particlesEnabled": False,
+            "particleBrightness": 255,
+            "color": (255, 255, 255),
+            "particleColor": (100, 100, 255),
+            "textStack": [],
+            "particles": {
+                "count": 6,
+                "renderMs": 20,
+                "substepMs": 20,
+                "gravityScale": 18.0,
+                "gravityEnabled": True,
+                "elasticity": 0.92,
+                "wallElasticity": 0.78,
+                "damping": 0.9998,
+                "radius": 0.45,
+                "renderStyle": 4,
+                "glowSigma": 1.2,
+                "glowWavelength": 0.0,
+                "temperature": 0.0,
+                "attractStrength": 0.0,
+                "attractRange": 3.0,
+                "speedColor": False,
+                "physicsPaused": False,
+                "viewRotation": 0.0,
+                "viewScale": 1.0,
+                "viewTx": 0.0,
+                "viewTy": 0.0,
+            },
+        }
+
+    def _snapshot_display_state(self):
+        """Capture current widget values into a dict."""
+        return {
+            "textEnabled": self._text_enabled.get(),
+            "mode": self._mode_var.get(),
+            "textBrightness": self._text_brightness_var.get(),
+            "particlesEnabled": self._particles_enabled.get(),
+            "particleBrightness": self._particle_brightness_var.get(),
+            "color": (self._r_var.get(), self._g_var.get(), self._b_var.get()),
+            "particleColor": self._pcolor,
+            "textStack": list(self._ts_listbox.get(0, "end")),
+            "particles": {
+                "count": self._pcount_var.get(),
+                "renderMs": self._prenderms_var.get(),
+                "substepMs": self._psubstep_var.get(),
+                "gravityScale": self._pgrav_var.get(),
+                "gravityEnabled": self._pgrav_enabled.get(),
+                "elasticity": self._pelast_var.get(),
+                "wallElasticity": self._pwelast_var.get(),
+                "damping": self._pdamping_var.get(),
+                "radius": self._pradius_var.get(),
+                "renderStyle": self._prender_var.get(),
+                "glowSigma": self._psigma_var.get(),
+                "glowWavelength": self._pwavelength_var.get(),
+                "temperature": self._ptemp_var.get(),
+                "attractStrength": self._pattract_var.get(),
+                "attractRange": self._pattrange_var.get(),
+                "speedColor": self._pspeedcolor_var.get(),
+                "physicsPaused": self._physics_paused.get(),
+                "viewRotation": self._protate_var.get(),
+                "viewScale": self._pscale_var.get(),
+                "viewTx": self._ptx_var.get(),
+                "viewTy": self._pty_var.get(),
+            },
+        }
+
+    def _restore_display_state(self, state):
+        """Load a state dict into widgets without sending serial commands."""
+        self._loading = True
+        try:
+            self._text_enabled.set(state["textEnabled"])
+            self._mode_var.set(state["mode"])
+            self._text_brightness_var.set(state["textBrightness"])
+            self._text_bright_label.config(text=str(state["textBrightness"]))
+            self._particles_enabled.set(state["particlesEnabled"])
+            self._particle_brightness_var.set(state["particleBrightness"])
+            r, g, b = state["color"]
+            self._r_var.set(r); self._g_var.set(g); self._b_var.set(b)
+            self._color = (r, g, b)
+            self._color_preview.config(bg=self._color_hex())
+            self._pcolor = state["particleColor"]
+            self._pcolor_preview.config(bg=self._pcolor_hex())
+            # Text stack
+            self._ts_listbox.delete(0, "end")
+            for item in state["textStack"]:
+                self._ts_listbox.insert("end", item)
+            # Particles
+            p = state["particles"]
+            self._pcount_var.set(p["count"])
+            self._prenderms_var.set(p["renderMs"])
+            self._psubstep_var.set(p["substepMs"])
+            self._pgrav_var.set(p["gravityScale"])
+            self._pgrav_enabled.set(p["gravityEnabled"])
+            self._pelast_var.set(p["elasticity"])
+            self._pwelast_var.set(p["wallElasticity"])
+            self._pdamping_var.set(p["damping"])
+            self._pradius_var.set(p["radius"])
+            self._prender_var.set(p["renderStyle"])
+            self._psigma_var.set(p["glowSigma"])
+            self._pwavelength_var.set(p["glowWavelength"])
+            self._ptemp_var.set(p["temperature"])
+            self._pattract_var.set(p["attractStrength"])
+            self._pattrange_var.set(p["attractRange"])
+            self._pspeedcolor_var.set(p["speedColor"])
+            self._physics_paused.set(p.get("physicsPaused", False))
+            self._protate_var.set(p.get("viewRotation", 0.0))
+            self._pscale_var.set(p.get("viewScale", 1.0))
+            self._ptx_var.set(p.get("viewTx", 0.0))
+            self._pty_var.set(p.get("viewTy", 0.0))
+            # Update labels
+            self._pgrav_label.config(text=f"{p['gravityScale']:.1f}")
+            self._pradius_label.config(text=f"{p['radius']:.2f}")
+            self._psigma_label.config(text=f"{p['glowSigma']:.1f}")
+            self._ptemp_label.config(text=f"{p['temperature']:.2f}")
+            self._pattract_label.config(text=f"{p['attractStrength']:.2f}")
+            self._pwavelength_label.config(text=f"{p['glowWavelength']:.1f}")
+            self._protate_label.config(text=f"{p.get('viewRotation', 0.0):.1f}")
+            self._pscale_label.config(text=f"{p.get('viewScale', 1.0):.2f}")
+        finally:
+            self._loading = False
+
+    def _on_display_change(self, *_):
+        """Called when the display selector changes — swap per-display state."""
+        try:
+            new_display = self._display_var.get()
+        except tk.TclError:
+            return  # transient invalid value while typing
+        if new_display < 1 or new_display > 6:
+            return
+        if new_display == self._current_display:
+            return
+        # Save current widget state for the old display
+        self._display_states[self._current_display] = self._snapshot_display_state()
+        # Switch and restore
+        self._current_display = new_display
+        self._restore_display_state(self._display_states[new_display])
+
     def _send(self, cmd):
         if not self.ser or not self.ser.is_open:
             self._log_msg("Not connected")
@@ -464,22 +677,27 @@ class ScoreboardGUI:
         return f"/display/{self._display_var.get()}"
 
     def _on_mode_change(self):
+        if self._loading: return
         self._send(f"{self._disp_prefix()}/mode {self._mode_var.get()}")
 
     def _on_text_toggle(self):
+        if self._loading: return
         en = 1 if self._text_enabled.get() else 0
         self._send(f"{self._disp_prefix()}/text/enable {en}")
 
     def _on_particles_toggle(self):
+        if self._loading: return
         en = 1 if self._particles_enabled.get() else 0
         self._send(f"{self._disp_prefix()}/particles/enable {en}")
 
     def _on_text_brightness(self):
         val = self._text_brightness_var.get()
         self._text_bright_label.config(text=str(val))
+        if self._loading: return
         self._send(f"{self._disp_prefix()}/text/brightness {val}")
 
     def _on_particle_brightness(self):
+        if self._loading: return
         val = self._particle_brightness_var.get()
         self._send(f"{self._disp_prefix()}/particles/brightness {val}")
 
@@ -498,8 +716,6 @@ class ScoreboardGUI:
         text = self._text_var.get()
         if text:
             self._send(f'{self._disp_prefix()} "{text}"')
-            # Also add to the GUI stack display (firmware pushes automatically)
-            self._ts_listbox.insert("end", text)
             self._text_var.set("")
 
     def _pick_color(self):
@@ -518,6 +734,7 @@ class ScoreboardGUI:
     def _apply_color(self, r, g, b):
         self._color = (r, g, b)
         self._color_preview.config(bg=self._color_hex())
+        if self._loading: return
         self._send(f"{self._disp_prefix()}/color {r} {g} {b}")
 
     def _color_hex(self):
@@ -538,17 +755,18 @@ class ScoreboardGUI:
 
     def _send_particle_config(self):
         """Debounced: coalesces rapid slider drags into one send."""
-        if self._throttle_id is not None:
-            self.root.after_cancel(self._throttle_id)
-        self._throttle_id = self.root.after(
-            self.SEND_THROTTLE_MS, self._send_particle_config_now
-        )
         # Always update labels immediately (cheap, no serial)
         self._pgrav_label.config(text=f"{self._pgrav_var.get():.1f}")
         self._pradius_label.config(text=f"{self._pradius_var.get():.2f}")
         self._psigma_label.config(text=f"{self._psigma_var.get():.1f}")
         self._ptemp_label.config(text=f"{self._ptemp_var.get():.2f}")
         self._pattract_label.config(text=f"{self._pattract_var.get():.2f}")
+        if self._loading: return
+        if self._throttle_id is not None:
+            self.root.after_cancel(self._throttle_id)
+        self._throttle_id = self.root.after(
+            self.SEND_THROTTLE_MS, self._send_particle_config_now
+        )
 
     def _send_particle_config_now(self):
         """Actually send the particle config over serial."""
@@ -582,11 +800,71 @@ class ScoreboardGUI:
     def _clear_all(self):
         self._send("/clearall")
 
+    def _text_to_particles(self):
+        self._send(f"{self._disp_prefix()}/text2particles")
+        # Reflect state change: particles on, physics paused (text stays as-is)
+        self._particles_enabled.set(True)
+        self._physics_paused.set(True)
+
+    def _on_text2particles_count(self, count):
+        """Called on main thread when firmware reports TEXT2PARTICLES <count>."""
+        self._pcount_var.set(count)
+        # Also update the glow params to match what the firmware set
+        self._prender_var.set(4)         # RENDER_GLOW
+        self._psigma_var.set(0.6)
+        self._psigma_label.config(text="0.6")
+        self._pradius_var.set(0.35)
+        self._pradius_label.config(text="0.35")
+
+    def _clear_particles(self):
+        self._send(f"{self._disp_prefix()}/particles/enable 0")
+        self._send(f"{self._disp_prefix()}/particles/pause 0")
+        self._particles_enabled.set(False)
+        self._physics_paused.set(False)
+
+    def _toggle_physics_pause(self):
+        if self._loading:
+            return
+        val = 1 if self._physics_paused.get() else 0
+        self._send(f"{self._disp_prefix()}/particles/pause {val}")
+
+    def _send_transform(self):
+        """Send the full view transform (debounced via particle config throttle)."""
+        self._protate_label.config(text=f"{self._protate_var.get():.1f}")
+        self._pscale_label.config(text=f"{self._pscale_var.get():.2f}")
+        if self._loading:
+            return
+        angle = self._protate_var.get()
+        s = self._pscale_var.get()
+        tx = self._ptx_var.get()
+        ty = self._pty_var.get()
+        self._send(
+            f"{self._disp_prefix()}/particles/transform"
+            f" {angle:.1f} {s:.2f} {s:.2f} {tx:.1f} {ty:.1f}"
+        )
+
+    def _reset_transform(self):
+        self._protate_var.set(0.0)
+        self._pscale_var.set(1.0)
+        self._ptx_var.set(0.0)
+        self._pty_var.set(0.0)
+        self._protate_label.config(text="0.0")
+        self._pscale_label.config(text="1.00")
+        self._send(f"{self._disp_prefix()}/particles/resettransform")
+
     def _raster_scan(self):
         self._send("/rasterscan 20")
 
     def _reset_defaults(self):
         self._send("/defaults")
+        # Reset local per-display state to defaults
+        self._display_states = {n: self._default_display_state() for n in range(1, 7)}
+        self._restore_display_state(self._display_states[self._current_display])
+        self._brightness_var.set(10)
+        self._bright_label.config(text="10")
+        self._scrollspeed_var.set(50)
+        self._scrollspeed_label.config(text="50")
+        self._scrollcont_var.set(False)
         self._log_msg("Sent /defaults — all params reset")
 
     # ── Text stack UI handlers ────────────────────────────────
@@ -625,21 +903,24 @@ class ScoreboardGUI:
 
     def _gather_params(self):
         """Return all GUI parameters as a structured dict (new schema)."""
-        return {
+        # Snapshot current display into _display_states first
+        self._display_states[self._current_display] = self._snapshot_display_state()
+        cur = self._display_states[self._current_display]
+        result = {
             "display": self._display_var.get(),
             "brightness": self._brightness_var.get(),
-            "color": list(self._color),
-            "activeMode": self._mode_var.get(),
-            "textEnabled": self._text_enabled.get(),
-            "textBrightness": self._text_brightness_var.get(),
-            "particlesEnabled": self._particles_enabled.get(),
-            "particleBrightness": self._particle_brightness_var.get(),
-            "particleColor": list(self._pcolor),
-            "textStack": list(self._ts_listbox.get(0, "end")),
+            "color": list(cur["color"]),
+            "activeMode": cur["mode"],
+            "textEnabled": cur["textEnabled"],
+            "textBrightness": cur["textBrightness"],
+            "particlesEnabled": cur["particlesEnabled"],
+            "particleBrightness": cur["particleBrightness"],
+            "particleColor": list(cur["particleColor"]),
+            "textStack": cur["textStack"],
+            "scrollSpeed": self._scrollspeed_var.get(),
+            "scrollContinuous": self._scrollcont_var.get(),
             "modes": {
-                "text": {
-                    "textIndex": 0,
-                },
+                "text": {"textIndex": 0},
                 "scroll_up": {
                     "scrollStepMs": self._scrollspeed_var.get(),
                     "continuous": self._scrollcont_var.get(),
@@ -648,106 +929,125 @@ class ScoreboardGUI:
                     "scrollStepMs": self._scrollspeed_var.get(),
                     "continuous": self._scrollcont_var.get(),
                 },
-                "particles": {
-                    "count": self._pcount_var.get(),
-                    "renderMs": self._prenderms_var.get(),
-                    "substepMs": self._psubstep_var.get(),
-                    "gravityScale": self._pgrav_var.get(),
-                    "gravityEnabled": self._pgrav_enabled.get(),
-                    "elasticity": self._pelast_var.get(),
-                    "wallElasticity": self._pwelast_var.get(),
-                    "damping": self._pdamping_var.get(),
-                    "radius": self._pradius_var.get(),
-                    "renderStyle": self._prender_var.get(),
-                    "glowSigma": self._psigma_var.get(),
-                    "temperature": self._ptemp_var.get(),
-                    "attractStrength": self._pattract_var.get(),
-                    "attractRange": self._pattrange_var.get(),
-                    "glowWavelength": self._pwavelength_var.get(),
-                    "speedColor": self._pspeedcolor_var.get(),
-                },
+                "particles": dict(cur["particles"]),
+            },
+            # Per-display states (all 6 displays)
+            "allDisplays": {
+                str(n): self._display_states[n] for n in range(1, 7)
             },
         }
+        return result
 
     def _apply_params(self, d):
         """Set GUI variables from a parameter dict (supports old and new schema)."""
-        if "display" in d:
-            self._display_var.set(d["display"])
-        if "brightness" in d:
-            self._brightness_var.set(d["brightness"])
-            self._bright_label.config(text=str(d["brightness"]))
-        if "color" in d and len(d["color"]) == 3:
-            r, g, b = d["color"]
-            self._r_var.set(r); self._g_var.set(g); self._b_var.set(b)
-            self._color = (r, g, b)
-            self._color_preview.config(bg=self._color_hex())
+        self._loading = True
+        try:
+            if "brightness" in d:
+                self._brightness_var.set(d["brightness"])
+                self._bright_label.config(text=str(d["brightness"]))
 
-        # New schema: "activeMode" + "modes" block
-        if "activeMode" in d:
-            mode = d["activeMode"]
-            # Backwards compat: old "particles" mode → text + particlesEnabled
-            if mode == "particles":
-                self._mode_var.set("text")
-                self._particles_enabled.set(True)
+            # Load per-display states if present (new format)
+            if "allDisplays" in d:
+                for key, state in d["allDisplays"].items():
+                    n = int(key)
+                    if 1 <= n <= 6:
+                        # Merge with defaults so missing keys don't crash
+                        merged = self._default_display_state()
+                        merged.update({k: v for k, v in state.items() if k != "particles"})
+                        if "particles" in state:
+                            merged["particles"].update(state["particles"])
+                        # Ensure tuple for colors
+                        if isinstance(merged["color"], list):
+                            merged["color"] = tuple(merged["color"])
+                        if isinstance(merged["particleColor"], list):
+                            merged["particleColor"] = tuple(merged["particleColor"])
+                        self._display_states[n] = merged
+
+            if "display" in d:
+                target = d["display"]
+                self._current_display = target
+                self._display_var.set(target)
             else:
-                self._mode_var.set(mode)
-        elif "mode" in d:
-            self._mode_var.set(d["mode"])  # old schema compat
-        if "particlesEnabled" in d:
-            self._particles_enabled.set(d["particlesEnabled"])
-        if "textEnabled" in d:
-            self._text_enabled.set(d["textEnabled"])
-        if "textBrightness" in d:
-            self._text_brightness_var.set(d["textBrightness"])
-            self._text_bright_label.config(text=str(d["textBrightness"]))
-        if "particleBrightness" in d:
-            self._particle_brightness_var.set(d["particleBrightness"])
-        if "particleColor" in d and len(d["particleColor"]) == 3:
-            self._pcolor = tuple(d["particleColor"])
-            self._pcolor_preview.config(bg=self._pcolor_hex())
+                target = self._current_display
 
-        # Text stack
-        if "textStack" in d:
-            self._ts_listbox.delete(0, "end")
-            for item in d["textStack"]:
-                self._ts_listbox.insert("end", item)
+            # If no allDisplays, load flat params into current display (old format compat)
+            if "allDisplays" not in d:
+                if "color" in d and len(d["color"]) == 3:
+                    r, g, b = d["color"]
+                    self._r_var.set(r); self._g_var.set(g); self._b_var.set(b)
+                    self._color = (r, g, b)
+                    self._color_preview.config(bg=self._color_hex())
+                if "activeMode" in d:
+                    mode = d["activeMode"]
+                    if mode == "particles":
+                        self._mode_var.set("text")
+                        self._particles_enabled.set(True)
+                    else:
+                        self._mode_var.set(mode)
+                elif "mode" in d:
+                    self._mode_var.set(d["mode"])
+                if "particlesEnabled" in d:
+                    self._particles_enabled.set(d["particlesEnabled"])
+                if "textEnabled" in d:
+                    self._text_enabled.set(d["textEnabled"])
+                if "textBrightness" in d:
+                    self._text_brightness_var.set(d["textBrightness"])
+                    self._text_bright_label.config(text=str(d["textBrightness"]))
+                if "particleBrightness" in d:
+                    self._particle_brightness_var.set(d["particleBrightness"])
+                if "particleColor" in d and len(d["particleColor"]) == 3:
+                    self._pcolor = tuple(d["particleColor"])
+                    self._pcolor_preview.config(bg=self._pcolor_hex())
+                if "textStack" in d:
+                    self._ts_listbox.delete(0, "end")
+                    for item in d["textStack"]:
+                        self._ts_listbox.insert("end", item)
 
-        # New schema: per-mode params
-        modes = d.get("modes", {})
-        if modes:
-            # Scroll settings (shared between scroll_up/scroll_down)
-            scroll = modes.get("scroll_up", modes.get("scroll_down", {}))
-            if "scrollStepMs" in scroll:
-                self._scrollspeed_var.set(scroll["scrollStepMs"])
-                self._scrollspeed_label.config(text=str(scroll["scrollStepMs"]))
-            if "continuous" in scroll:
-                self._scrollcont_var.set(scroll["continuous"])
+                modes = d.get("modes", {})
+                if modes:
+                    scroll = modes.get("scroll_up", modes.get("scroll_down", {}))
+                    if "scrollStepMs" in scroll:
+                        self._scrollspeed_var.set(scroll["scrollStepMs"])
+                        self._scrollspeed_label.config(text=str(scroll["scrollStepMs"]))
+                    if "continuous" in scroll:
+                        self._scrollcont_var.set(scroll["continuous"])
+                    p = modes.get("particles", {})
+                else:
+                    if "scrollspeed" in d:
+                        self._scrollspeed_var.set(d["scrollspeed"])
+                        self._scrollspeed_label.config(text=str(d["scrollspeed"]))
+                    p = d.get("particles", {})
 
-            # Particle settings
-            p = modes.get("particles", {})
-        else:
-            # Old schema compat: flat params
-            if "scrollspeed" in d:
-                self._scrollspeed_var.set(d["scrollspeed"])
-                self._scrollspeed_label.config(text=str(d["scrollspeed"]))
-            p = d.get("particles", {})
+                if "count" in p: self._pcount_var.set(p["count"])
+                if "renderMs" in p: self._prenderms_var.set(p["renderMs"])
+                if "substepMs" in p: self._psubstep_var.set(p["substepMs"])
+                if "gravityScale" in p: self._pgrav_var.set(p["gravityScale"])
+                if "gravityEnabled" in p: self._pgrav_enabled.set(p["gravityEnabled"])
+                if "elasticity" in p: self._pelast_var.set(p["elasticity"])
+                if "wallElasticity" in p: self._pwelast_var.set(p["wallElasticity"])
+                if "damping" in p: self._pdamping_var.set(p["damping"])
+                if "radius" in p: self._pradius_var.set(p["radius"])
+                if "renderStyle" in p: self._prender_var.set(p["renderStyle"])
+                if "glowSigma" in p: self._psigma_var.set(p["glowSigma"])
+                if "temperature" in p: self._ptemp_var.set(p["temperature"])
+                if "attractStrength" in p: self._pattract_var.set(p["attractStrength"])
+                if "attractRange" in p: self._pattrange_var.set(p["attractRange"])
+                if "glowWavelength" in p: self._pwavelength_var.set(p["glowWavelength"])
+                if "speedColor" in p: self._pspeedcolor_var.set(p["speedColor"])
 
-        if "count" in p: self._pcount_var.set(p["count"])
-        if "renderMs" in p: self._prenderms_var.set(p["renderMs"])
-        if "substepMs" in p: self._psubstep_var.set(p["substepMs"])
-        if "gravityScale" in p: self._pgrav_var.set(p["gravityScale"])
-        if "gravityEnabled" in p: self._pgrav_enabled.set(p["gravityEnabled"])
-        if "elasticity" in p: self._pelast_var.set(p["elasticity"])
-        if "wallElasticity" in p: self._pwelast_var.set(p["wallElasticity"])
-        if "damping" in p: self._pdamping_var.set(p["damping"])
-        if "radius" in p: self._pradius_var.set(p["radius"])
-        if "renderStyle" in p: self._prender_var.set(p["renderStyle"])
-        if "glowSigma" in p: self._psigma_var.set(p["glowSigma"])
-        if "temperature" in p: self._ptemp_var.set(p["temperature"])
-        if "attractStrength" in p: self._pattract_var.set(p["attractStrength"])
-        if "attractRange" in p: self._pattrange_var.set(p["attractRange"])
-        if "glowWavelength" in p: self._pwavelength_var.set(p["glowWavelength"])
-        if "speedColor" in p: self._pspeedcolor_var.set(p["speedColor"])
+            # Global scroll settings
+            if "scrollSpeed" in d:
+                self._scrollspeed_var.set(d["scrollSpeed"])
+                self._scrollspeed_label.config(text=str(d["scrollSpeed"]))
+            if "scrollContinuous" in d:
+                self._scrollcont_var.set(d["scrollContinuous"])
+        finally:
+            self._loading = False
+
+        # Restore active display widgets from its state
+        if target in self._display_states:
+            self._restore_display_state(self._display_states[target])
+
         # Refresh value labels
         self._pgrav_label.config(text=f"{self._pgrav_var.get():.1f}")
         self._pradius_label.config(text=f"{self._pradius_var.get():.2f}")
@@ -781,25 +1081,39 @@ class ScoreboardGUI:
             d = json.load(f)
         self._apply_params(d)
         self._log_msg(f"Preset loaded ← {path}")
-        # Push all values to the device
-        self._on_brightness()
-        self._on_color_slider()
-        self._on_scrollspeed()
-        self._on_scrollcontinuous()
-        self._on_mode_change()
-        self._on_text_toggle()
-        self._on_particles_toggle()
-        self._on_text_brightness()
-        self._on_particle_brightness()
-        # Push particle colour
-        r, g, b = self._pcolor
-        self._send(f"{self._disp_prefix()}/particles/color {r} {g} {b}")
-        self._send_particle_config()
-        # Push text stack to device
-        self._send(f"{self._disp_prefix()}/text/clear")
-        for i in range(self._ts_listbox.size()):
-            text = self._ts_listbox.get(i)
-            self._send(f'{self._disp_prefix()}/text/push "{text}"')
+
+        # Push global settings to device
+        self._send(f"/brightness {self._brightness_var.get()}")
+        self._send(f"/scrollspeed {self._scrollspeed_var.get()}")
+        self._send(f"/scrollcontinuous {1 if self._scrollcont_var.get() else 0}")
+
+        # Push per-display state to device
+        for n in range(1, 7):
+            st = self._display_states[n]
+            prefix = f"/display/{n}"
+            self._send(f"{prefix}/text/enable {1 if st['textEnabled'] else 0}")
+            self._send(f"{prefix}/particles/enable {1 if st['particlesEnabled'] else 0}")
+            self._send(f"{prefix}/mode {st['mode']}")
+            r, g, b = st["color"]
+            self._send(f"{prefix}/color {r} {g} {b}")
+            self._send(f"{prefix}/text/brightness {st['textBrightness']}")
+            self._send(f"{prefix}/particles/brightness {st['particleBrightness']}")
+            pr, pg, pb = st["particleColor"]
+            self._send(f"{prefix}/particles/color {pr} {pg} {pb}")
+            # Text stack
+            self._send(f"{prefix}/text/clear")
+            for item in st["textStack"]:
+                self._send(f'{prefix}/text/push "{item}"')
+            # Particle config
+            p = st["particles"]
+            self._send(
+                f"{prefix}/particles {p['count']} {p['renderMs']} {p['gravityScale']:.2f}"
+                f" {p['elasticity']:.2f} {p['wallElasticity']:.2f}"
+                f" {p['radius']:.2f} {p['renderStyle']} {p['glowSigma']:.2f}"
+                f" {p['temperature']:.2f} {p['attractStrength']:.2f} {p['attractRange']:.2f}"
+                f" {1 if p['gravityEnabled'] else 0} {p['substepMs']} {p['damping']:.4f}"
+                f" {p['glowWavelength']:.2f} {1 if p['speedColor'] else 0}"
+            )
 
     # ── ESP32 NVS save / load ─────────────────────────────────
 
@@ -832,7 +1146,7 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_default_port()
 
     root = tk.Tk()
-    root.geometry("720x960")
+    root.geometry("1280x820")
     app = ScoreboardGUI(root, initial_port=port)
 
     # Auto-connect if a port was found/specified

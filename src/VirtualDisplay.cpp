@@ -25,14 +25,14 @@ static uint16_t _heatColor(float speed, float maxSpeed) {
 
 // Update all particle colours from their velocity magnitude
 static void _applySpeedColors(ParticleSystem& ps) {
-    uint8_t n = ps.count();
+    uint16_t n = ps.count();
     // Find max speed to normalise
     float maxSpd = 0.001f; // avoid div-by-zero
-    for (uint8_t i = 0; i < n; i++) {
+    for (uint16_t i = 0; i < n; i++) {
         float spd = ps.particle(i).vel.length();
         if (spd > maxSpd) maxSpd = spd;
     }
-    for (uint8_t i = 0; i < n; i++) {
+    for (uint16_t i = 0; i < n; i++) {
         Particle& p = ps.particle(i);
         p.color = _heatColor(p.vel.length(), maxSpd);
     }
@@ -110,7 +110,7 @@ void VirtualDisplay::setParticleColor(uint16_t c565) {
     // Propagate to live particles (unless speedColor overrides)
     if (_modeConfig.particlesEnabled && _particleSys.isInitialised()
         && !_modeConfig.particles.speedColor) {
-        for (uint8_t i = 0; i < _particleSys.count(); i++) {
+        for (uint16_t i = 0; i < _particleSys.count(); i++) {
             _particleSys.particle(i).color = c565;
         }
     }
@@ -319,6 +319,98 @@ void VirtualDisplay::setParticleConfig(const ParticleModeConfig& cfg) {
     _dirty = true;
 }
 
+void VirtualDisplay::setPhysicsPaused(bool paused) {
+    _modeConfig.particles.physicsPaused = paused;
+    _dirty = true;
+}
+
+// ── View transform setters ───────────────────────────────────
+
+void VirtualDisplay::setParticleTransform(const ParticleTransform2D& t) {
+    _modeConfig.particles.viewTransform = t;
+    _dirty = true;
+}
+
+void VirtualDisplay::setParticleRotation(float angleDeg) {
+    _modeConfig.particles.viewTransform.angle = angleDeg * (3.14159265f / 180.0f);
+    _dirty = true;
+}
+
+void VirtualDisplay::setParticleScale(float sx, float sy) {
+    _modeConfig.particles.viewTransform.scaleX = sx;
+    _modeConfig.particles.viewTransform.scaleY = sy;
+    _dirty = true;
+}
+
+void VirtualDisplay::setParticleTranslation(float tx, float ty) {
+    _modeConfig.particles.viewTransform.tx = tx;
+    _modeConfig.particles.viewTransform.ty = ty;
+    _dirty = true;
+}
+
+void VirtualDisplay::resetParticleTransform() {
+    _modeConfig.particles.viewTransform = ParticleTransform2D();
+    _dirty = true;
+}
+
+uint16_t VirtualDisplay::textToParticles() {
+    // 1. Render text to canvas so we can scan the bitmap
+    fillScreen(0);
+    const char* txt = _activeText();
+    if (!txt || txt[0] == '\0') return 0;
+
+    const char* visible = _fitTextRight(txt);
+    if (!visible || *visible == '\0') return 0;
+
+    setTextColor(_color);
+    int16_t x = _centerTextX(visible);
+    setCursor(x, 0);
+    print(visible);
+
+    // 2. Scan canvas for lit pixels → collect positions
+    uint16_t w = width();
+    uint16_t h = height();
+    Vec2f positions[ParticleSystem::MAX_PARTICLES];
+    uint16_t count = 0;
+
+    const uint16_t* buf = getBuffer();
+    for (uint16_t py = 0; py < h && count < ParticleSystem::MAX_PARTICLES; py++) {
+        for (uint16_t px = 0; px < w && count < ParticleSystem::MAX_PARTICLES; px++) {
+            if (buf[py * w + px] != 0) {
+                // Centre particle on the pixel
+                positions[count++] = Vec2f((float)px + 0.5f, (float)py + 0.5f);
+            }
+        }
+    }
+
+    if (count == 0) return 0;
+
+    // 3. Configure particles for glow, physics paused
+    _modeConfig.particles.count        = count;
+    _modeConfig.particles.renderStyle  = ParticleModeConfig::RENDER_GLOW;
+    _modeConfig.particles.glowSigma    = 0.6f;   // tight glow for sharp text
+    _modeConfig.particles.physicsPaused = true;
+    _modeConfig.particles.gravityEnabled = true;
+    _modeConfig.particles.radius       = 0.35f;
+    // Keep other physics params (temperature, damping, etc.) as they are
+
+    // 4. Create particles at the scanned positions
+    _particleSys.setConfig(_modeConfig.particles.toSystemConfig());
+    _particleSys.initFromPositions(positions, count,
+                                    (float)w, (float)h,
+                                    _modeConfig.particles.radius,
+                                    _modeConfig.particleColor);
+
+    // 5. Enable particles (keep text layer unchanged)
+    _modeConfig.particlesEnabled = true;
+    _lastParticleStep  = millis();
+    _lastParticleRender = _lastParticleStep;
+    _dirty = true;
+
+    Serial.printf("TEXT2PARTICLES %d\n", count);
+    return count;
+}
+
 void VirtualDisplay::clearQueue() {
     _resetQueue();
 }
@@ -454,13 +546,17 @@ bool VirtualDisplay::_updateParticles() {
 
     unsigned long now = millis();
 
-    // Always advance physics at the real elapsed dt
-    float dt = _dirty
-        ? (_modeConfig.particles.renderMs * 0.001f)
-        : ((now - _lastParticleStep) * 0.001f);
-    if (dt > 0.0f) {
-        _particleSys.step(dt);
-        _lastParticleStep = now;
+    // Advance physics (skip when paused)
+    if (!_modeConfig.particles.physicsPaused) {
+        float dt = _dirty
+            ? (_modeConfig.particles.renderMs * 0.001f)
+            : ((now - _lastParticleStep) * 0.001f);
+        if (dt > 0.0f) {
+            _particleSys.step(dt);
+            _lastParticleStep = now;
+        }
+    } else {
+        _lastParticleStep = now;  // keep timestamp current
     }
 
     // Render at the (independent) render interval
@@ -504,14 +600,21 @@ void VirtualDisplay::_renderParticlesShape() {
     if (_modeConfig.particles.speedColor) _applySpeedColors(_particleSys);
     uint8_t pb = _modeConfig.particleBrightness;
     fillScreen(0);
-    uint8_t n = _particleSys.count();
+    uint16_t n = _particleSys.count();
     auto style = _modeConfig.particles.renderStyle;
 
-    for (uint8_t i = 0; i < n; i++) {
+    const ParticleTransform2D& xf = _modeConfig.particles.viewTransform;
+    bool hasXf = !xf.isIdentity();
+    float pivotX = (float)width()  * 0.5f;
+    float pivotY = (float)height() * 0.5f;
+
+    for (uint16_t i = 0; i < n; i++) {
         const Particle& p = _particleSys.particle(i);
         uint16_t col = (pb < 255) ? dimColor565(p.color, pb) : p.color;
-        int16_t px = (int16_t)lroundf(p.pos.x);
-        int16_t py = (int16_t)lroundf(p.pos.y);
+
+        Vec2f pos = hasXf ? xf.apply(p.pos, pivotX, pivotY) : p.pos;
+        int16_t px = (int16_t)lroundf(pos.x);
+        int16_t py = (int16_t)lroundf(pos.y);
 
         switch (style) {
             case ParticleModeConfig::RENDER_SQUARE: {
@@ -578,33 +681,40 @@ void VirtualDisplay::_renderParticlesGlow() {
         ? (int)ceilf(sigma * 5.0f)
         : (int)ceilf(sigma * 3.5f);
 
-    uint8_t n = _particleSys.count();
+    uint16_t n = _particleSys.count();
+
+    // View transform
+    const ParticleTransform2D& xf = _modeConfig.particles.viewTransform;
+    bool hasXf = !xf.isIdentity();
+    float pivotX = (float)w * 0.5f;
+    float pivotY = (float)h * 0.5f;
 
     if (doInterference) {
         // ── Complex-amplitude interference ────────────────────
         // 6 floats per pixel: Re_R, Im_R, Re_G, Im_G, Re_B, Im_B
         memset(_glowBuf, 0, totalPx * 6 * sizeof(float));
 
-        for (uint8_t i = 0; i < n; i++) {
+        for (uint16_t i = 0; i < n; i++) {
             const Particle& p = _particleSys.particle(i);
             float pr, pg, pb;
             rgb565_to_float(p.color, pr, pg, pb);
             pr *= brightScale; pg *= brightScale; pb *= brightScale;
 
-            int x0 = (int)floorf(p.pos.x) - kernelRadius;
-            int x1 = (int)ceilf(p.pos.x)  + kernelRadius;
-            int y0 = (int)floorf(p.pos.y) - kernelRadius;
-            int y1 = (int)ceilf(p.pos.y)  + kernelRadius;
+            Vec2f pos = hasXf ? xf.apply(p.pos, pivotX, pivotY) : p.pos;
+            int x0 = (int)floorf(pos.x) - kernelRadius;
+            int x1 = (int)ceilf(pos.x)  + kernelRadius;
+            int y0 = (int)floorf(pos.y) - kernelRadius;
+            int y1 = (int)ceilf(pos.y)  + kernelRadius;
             if (x0 < 0) x0 = 0;
             if (y0 < 0) y0 = 0;
             if (x1 >= (int)w) x1 = (int)w - 1;
             if (y1 >= (int)h) y1 = (int)h - 1;
 
             for (int py = y0; py <= y1; py++) {
-                float dy = (float)py - p.pos.y;
+                float dy = (float)py - pos.y;
                 float dy2 = dy * dy;
                 for (int px = x0; px <= x1; px++) {
-                    float dx = (float)px - p.pos.x;
+                    float dx = (float)px - pos.x;
                     float distSq = dx * dx + dy2;
                     float envelope = expf(-distSq * invTwoSigmaSq);
                     float dist = sqrtf(distSq);
@@ -651,26 +761,27 @@ void VirtualDisplay::_renderParticlesGlow() {
         // Use first 3 floats per pixel (Re_R, Re_G, Re_B)
         memset(_glowBuf, 0, totalPx * 3 * sizeof(float));
 
-        for (uint8_t i = 0; i < n; i++) {
+        for (uint16_t i = 0; i < n; i++) {
             const Particle& p = _particleSys.particle(i);
             float pr, pg, pb;
             rgb565_to_float(p.color, pr, pg, pb);
             pr *= brightScale; pg *= brightScale; pb *= brightScale;
 
-            int x0 = (int)floorf(p.pos.x) - kernelRadius;
-            int x1 = (int)ceilf(p.pos.x)  + kernelRadius;
-            int y0 = (int)floorf(p.pos.y) - kernelRadius;
-            int y1 = (int)ceilf(p.pos.y)  + kernelRadius;
+            Vec2f pos = hasXf ? xf.apply(p.pos, pivotX, pivotY) : p.pos;
+            int x0 = (int)floorf(pos.x) - kernelRadius;
+            int x1 = (int)ceilf(pos.x)  + kernelRadius;
+            int y0 = (int)floorf(pos.y) - kernelRadius;
+            int y1 = (int)ceilf(pos.y)  + kernelRadius;
             if (x0 < 0) x0 = 0;
             if (y0 < 0) y0 = 0;
             if (x1 >= (int)w) x1 = (int)w - 1;
             if (y1 >= (int)h) y1 = (int)h - 1;
 
             for (int py = y0; py <= y1; py++) {
-                float dy = (float)py - p.pos.y;
+                float dy = (float)py - pos.y;
                 float dy2 = dy * dy;
                 for (int px = x0; px <= x1; px++) {
-                    float dx = (float)px - p.pos.x;
+                    float dx = (float)px - pos.x;
                     float distSq = dx * dx + dy2;
                     float intensity = expf(-distSq * invTwoSigmaSq);
 

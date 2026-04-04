@@ -359,6 +359,52 @@ No arguments. Replies on serial with `ANIMATING 0` or `ANIMATING 1`.
 
 ---
 
+### `/display/<N>/text2particles` — convert text to frozen particles
+
+No arguments. Renders the current text on display _N_ into a GFX
+canvas, scans for lit pixels, and creates a particle at each one.
+The text layer is disabled, the particle layer is enabled with
+**physics paused** and glow rendering (σ = 0.6). The result is
+the text drawn as glowing particles, frozen in place.
+
+To make the text "explode", resume physics afterwards:
+
+```
+/display/1/text2particles
+/display/1/particles/pause 0
+```
+
+**Global form:** `/text2particles` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/text2particles
+```
+
+---
+
+### `/display/<N>/particles/pause` — pause / resume particle physics
+
+| Parameter | Type  | Description            |
+| --------- | ----- | ---------------------- |
+| arg 0     | `int` | `1` = pause, `0` = run |
+
+When paused, particles keep rendering (glow, shapes) but do not
+move — gravity, collisions, temperature and attraction are frozen.
+Useful for freeze-frame effects or when using `text2particles`.
+
+**Global form:** `/particles/pause 1` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/pause 1
+/display/1/particles/pause 0
+```
+
+---
+
 ### `/clearall` or `/clear` — clear all displays
 
 No arguments. Turns off all LEDs on all six displays.
