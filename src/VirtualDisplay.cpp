@@ -313,14 +313,31 @@ void VirtualDisplay::setGravity(float gx, float gy) {
 }
 
 void VirtualDisplay::setParticleConfig(const ParticleModeConfig& cfg) {
+    bool wasSpeedColor = _modeConfig.particles.speedColor;
     _modeConfig.particles = cfg;
     if (_modeConfig.particles.renderMs == 0) _modeConfig.particles.renderMs = 1;
     _particleSys.setConfig(cfg.toSystemConfig());
+
+    // Restore original colours when speedColor is switched off
+    if (wasSpeedColor && !cfg.speedColor) {
+        _particleSys.restoreColorsFromScaffold();
+    }
+
     _dirty = true;
 }
 
 void VirtualDisplay::setPhysicsPaused(bool paused) {
     _modeConfig.particles.physicsPaused = paused;
+    _dirty = true;
+}
+
+void VirtualDisplay::restoreScaffoldPositions() {
+    _particleSys.restorePositionsFromScaffold();
+    _dirty = true;
+}
+
+void VirtualDisplay::restoreScaffoldColors() {
+    _particleSys.restoreColorsFromScaffold();
     _dirty = true;
 }
 
@@ -377,21 +394,26 @@ uint16_t VirtualDisplay::textToParticles() {
     for (uint16_t py = 0; py < h && count < ParticleSystem::MAX_PARTICLES; py++) {
         for (uint16_t px = 0; px < w && count < ParticleSystem::MAX_PARTICLES; px++) {
             if (buf[py * w + px] != 0) {
-                // Centre particle on the pixel
-                positions[count++] = Vec2f((float)px + 0.5f, (float)py + 0.5f);
+                // Integer coords, not +0.5 centred: lroundf(N+0.5)==N+1
+                // which shifts every particle 1 pixel right/down in all modes.
+                positions[count++] = Vec2f((float)px, (float)py);
             }
         }
     }
 
     if (count == 0) return 0;
 
-    // 3. Configure particles for glow, physics paused
+    // 3. Configure particles for glow, physics paused, scaffold spring active
     _modeConfig.particles.count        = count;
     _modeConfig.particles.renderStyle  = ParticleModeConfig::RENDER_GLOW;
     _modeConfig.particles.glowSigma    = 0.6f;   // tight glow for sharp text
     _modeConfig.particles.physicsPaused = true;
     _modeConfig.particles.gravityEnabled = true;
     _modeConfig.particles.radius       = 0.35f;
+    _modeConfig.particles.collisionEnabled = false; // scaffold text: no bumping
+    _modeConfig.particles.scaffoldEnabled  = true;  // spring to original positions
+    _modeConfig.particles.scaffoldStrength = 1.0f;  // moderate pull
+    _modeConfig.particles.scaffoldRange    = 10.0f;
     // Keep other physics params (temperature, damping, etc.) as they are
 
     // 4. Create particles at the scanned positions
@@ -408,6 +430,66 @@ uint16_t VirtualDisplay::textToParticles() {
     _dirty = true;
 
     Serial.printf("TEXT2PARTICLES %d\n", count);
+    return count;
+}
+
+uint16_t VirtualDisplay::screenToParticles() {
+    // Scan the current canvas buffer as-is — whatever was rendered
+    // (text, particles, or any GFX drawing).  Each lit pixel becomes
+    // a particle whose colour matches the original pixel.
+    uint16_t w = width();
+    uint16_t h = height();
+    Vec2f    positions[ParticleSystem::MAX_PARTICLES];
+    uint16_t colors[ParticleSystem::MAX_PARTICLES];
+    uint16_t count = 0;
+
+    const uint16_t* buf = getBuffer();
+    for (uint16_t py = 0; py < h && count < ParticleSystem::MAX_PARTICLES; py++) {
+        for (uint16_t px = 0; px < w && count < ParticleSystem::MAX_PARTICLES; px++) {
+            uint16_t c = buf[py * w + px];
+            if (c != 0) {
+                positions[count] = Vec2f((float)px, (float)py);
+                colors[count]    = c;
+                count++;
+            }
+        }
+    }
+
+    if (count == 0) return 0;
+
+    // Configure particles for glow, physics paused, scaffold spring active
+    _modeConfig.particles.count         = count;
+    _modeConfig.particles.renderStyle   = ParticleModeConfig::RENDER_GLOW;
+    _modeConfig.particles.glowSigma     = 0.6f;
+    _modeConfig.particles.physicsPaused = true;
+    _modeConfig.particles.gravityEnabled = true;
+    _modeConfig.particles.radius        = 0.35f;
+    _modeConfig.particles.collisionEnabled = false; // scaffold: no bumping
+    _modeConfig.particles.scaffoldEnabled  = true;  // spring to original positions
+    _modeConfig.particles.scaffoldStrength = 1.0f;
+    _modeConfig.particles.scaffoldRange    = 10.0f;
+
+    // Create particles at scanned positions (uniform color placeholder)
+    _particleSys.setConfig(_modeConfig.particles.toSystemConfig());
+    _particleSys.initFromPositions(positions, count,
+                                    (float)w, (float)h,
+                                    _modeConfig.particles.radius,
+                                    0xFFFF);
+
+    // Overwrite each particle's colour with its original pixel colour
+    for (uint16_t i = 0; i < count; i++) {
+        _particleSys.particle(i).color = colors[i];
+    }
+    // Re-snapshot scaffold so it captures the per-pixel colours
+    _particleSys.saveScaffold();
+
+    // Enable particles
+    _modeConfig.particlesEnabled = true;
+    _lastParticleStep  = millis();
+    _lastParticleRender = _lastParticleStep;
+    _dirty = true;
+
+    Serial.printf("SCREEN2PARTICLES %d\n", count);
     return count;
 }
 

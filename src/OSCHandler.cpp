@@ -114,7 +114,18 @@ IPAddress OSCHandler::localIP() {
 //    /display/<N>/text/clear   — clear text stack
 //    /display/<N>/text/list    — print text stack to serial
 //    /display/<N>/text2particles — convert rendered text to frozen particles
+//    /display/<N>/screen2particles — capture current screen to particles (with colours)
+//    /display/<N>/particles    — particle config (up to 26 positional args):
+//                                count renderMs gravityScale elasticity wallElasticity
+//                                radius renderStyle glowSigma temperature attractStrength attractRange
+//                                gravityEnabled substepMs damping glowWavelength
+//                                speedColor springStrength springRange springEnabled
+//                                coulombStrength coulombRange coulombEnabled
+//                                scaffoldStrength scaffoldRange scaffoldEnabled
+//                                collisionEnabled
 //    /display/<N>/particles/pause — pause/resume physics: 0=run, 1=pause
+//    /display/<N>/particles/restore — restore scaffold positions (pauses physics)
+//    /display/<N>/particles/restorecolors — restore scaffold colours
 //    /display/<N>/particles/transform — view transform: angleDeg scaleX scaleY tx ty
 //    /display/<N>/particles/rotate   — rotation only (float degrees)
 //    /display/<N>/particles/scale    — scale only (float sx [sy])
@@ -136,7 +147,10 @@ IPAddress OSCHandler::localIP() {
 //    /text/clear               — clear text stack (all displays)
 //    /text/list                — print text stacks to serial
 //    /text2particles           — text-to-particles on all displays
+//    /screen2particles         — screen-to-particles on all displays (with colours)
 //    /particles/pause          — pause/resume physics (all displays): 0/1
+//    /particles/restore        — restore scaffold positions (all, pauses physics)
+//    /particles/restorecolors  — restore scaffold colours (all)
 //    /particles/rotate         — rotation (all, float degrees)
 //    /particles/scale          — scale (all, float sx [sy])
 //    /particles/translate      — translate (all, float tx ty)
@@ -304,12 +318,26 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (msg.size() >= 14 && msg.isFloat(13)) cfg.damping        = msg.getFloat(13);
                 if (msg.size() >= 15 && msg.isFloat(14)) cfg.glowWavelength = msg.getFloat(14);
                 if (msg.size() >= 16 && msg.isInt(15))   cfg.speedColor     = (msg.getInt(15) != 0);
+                if (msg.size() >= 17 && msg.isFloat(16)) cfg.springStrength  = msg.getFloat(16);
+                if (msg.size() >= 18 && msg.isFloat(17)) cfg.springRange     = msg.getFloat(17);
+                if (msg.size() >= 19 && msg.isInt(18))   cfg.springEnabled   = (msg.getInt(18) != 0);
+                if (msg.size() >= 20 && msg.isFloat(19)) cfg.coulombStrength  = msg.getFloat(19);
+                if (msg.size() >= 21 && msg.isFloat(20)) cfg.coulombRange     = msg.getFloat(20);
+                if (msg.size() >= 22 && msg.isInt(21))   cfg.coulombEnabled   = (msg.getInt(21) != 0);
+                if (msg.size() >= 23 && msg.isFloat(22)) cfg.scaffoldStrength = msg.getFloat(22);
+                if (msg.size() >= 24 && msg.isFloat(23)) cfg.scaffoldRange    = msg.getFloat(23);
+                if (msg.size() >= 25 && msg.isInt(24))   cfg.scaffoldEnabled  = (msg.getInt(24) != 0);
+                if (msg.size() >= 26 && msg.isInt(25))   cfg.collisionEnabled = (msg.getInt(25) != 0);
                 _display.setParticleConfig(idx, cfg);
-                Serial.printf("D%d particles: n=%d grav=%.1f(%s) el=%.2f att=%.2f@%.1f temp=%.2f\n",
+                Serial.printf("D%d particles: n=%d grav=%.1f(%s) el=%.2f att=%.2f@%.1f temp=%.2f spr=%.2f@%.1f(%s) coul=%.2f@%.1f(%s) scf=%.2f@%.1f(%s) col=%s\n",
                               displayNum, cfg.count,
                               cfg.gravityScale, cfg.gravityEnabled ? "on" : "off",
                               cfg.elasticity, cfg.attractStrength, cfg.attractRange,
-                              cfg.temperature);
+                              cfg.temperature,
+                              cfg.springStrength, cfg.springRange, cfg.springEnabled ? "on" : "off",
+                              cfg.coulombStrength, cfg.coulombRange, cfg.coulombEnabled ? "on" : "off",
+                              cfg.scaffoldStrength, cfg.scaffoldRange, cfg.scaffoldEnabled ? "on" : "off",
+                              cfg.collisionEnabled ? "on" : "off");
             }
         }
         // ── /display/<N>/text/push "STR" — per-display text stack ─
@@ -357,6 +385,14 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 Serial.printf("D%d text→particles\n", displayNum);
             }
         }
+        // ── /display/<N>/screen2particles — capture screen to particles ──
+        else if (strcmp(subCmd, "screen2particles") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->screenToParticles();
+                Serial.printf("D%d screen→particles\n", displayNum);
+            }
+        }
         // ── /display/<N>/particles/pause — pause/resume physics ─
         else if (strcmp(subCmd, "particles/pause") == 0) {
             if (msg.isInt(0)) {
@@ -365,6 +401,23 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                     vd->setPhysicsPaused(msg.getInt(0) != 0);
                     Serial.printf("D%d physics %s\n", displayNum, msg.getInt(0) ? "PAUSED" : "RUNNING");
                 }
+            }
+        }
+        // ── /display/<N>/particles/restore — restore scaffold positions ─
+        else if (strcmp(subCmd, "particles/restore") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->restoreScaffoldPositions();
+                vd->setPhysicsPaused(true);
+                Serial.printf("D%d scaffold positions restored\n", displayNum);
+            }
+        }
+        // ── /display/<N>/particles/restorecolors — restore scaffold colors ─
+        else if (strcmp(subCmd, "particles/restorecolors") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->restoreScaffoldColors();
+                Serial.printf("D%d scaffold colours restored\n", displayNum);
             }
         }
         // ── /display/<N>/particles/transform — set view transform ─
@@ -556,6 +609,14 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         }
         Serial.println("All text→particles");
     }
+    // ── /screen2particles — capture screen to particles (all) ─
+    else if (strcmp(address, "/screen2particles") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->screenToParticles();
+        }
+        Serial.println("All screen→particles");
+    }
     // ── /particles/pause — pause/resume physics (all) ────────
     else if (strcmp(address, "/particles/pause") == 0) {
         if (msg.isInt(0)) {
@@ -565,6 +626,22 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             }
             Serial.printf("All physics %s\n", msg.getInt(0) ? "PAUSED" : "RUNNING");
         }
+    }
+    // ── /particles/restore — restore scaffold positions (all) ─
+    else if (strcmp(address, "/particles/restore") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) { vd->restoreScaffoldPositions(); vd->setPhysicsPaused(true); }
+        }
+        Serial.println("All scaffold positions restored");
+    }
+    // ── /particles/restorecolors — restore scaffold colors (all) ─
+    else if (strcmp(address, "/particles/restorecolors") == 0) {
+        for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+            VirtualDisplay* vd = _display.getDisplay(i);
+            if (vd) vd->restoreScaffoldColors();
+        }
+        Serial.println("All scaffold colours restored");
     }
     // ── /particles/rotate — rotate all (degrees) ─────────────
     else if (strcmp(address, "/particles/rotate") == 0) {

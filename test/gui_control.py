@@ -277,6 +277,11 @@ class ScoreboardGUI:
         self._pgrav_label = ttk.Label(part_f, text="18.0")
         self._pgrav_label.grid(row=2, column=3, **pad)
 
+        # Row 2 cont: collision enable checkbox
+        self._pcollision_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(part_f, text="Collision", variable=self._pcollision_enabled,
+                        command=self._send_particle_config).grid(row=2, column=4, **pad)
+
         # Row 3: restitution (particle-particle) + wall restitution
         ttk.Label(part_f, text="Restit (p-p):").grid(row=3, column=0, **pad)
         self._pelast_var = tk.DoubleVar(value=0.92)
@@ -353,47 +358,107 @@ class ScoreboardGUI:
                   orient="horizontal", length=100,
                   command=lambda *_: self._send_particle_config()).grid(row=7, column=4, **pad)
 
-        # Row 8: Text→Particles + Clear Particles + Pause Physics
+        # Row 8: spring force — enable + strength + range
+        self._pspring_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Spring",
+                        variable=self._pspring_enabled,
+                        command=self._send_particle_config).grid(
+            row=8, column=0, sticky="w", **pad
+        )
+        ttk.Label(part_f, text="Str:").grid(row=8, column=1, sticky="e", **pad)
+        self._pspring_str_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=-5.0, to=5.0, variable=self._pspring_str_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=8, column=2, **pad)
+        self._pspring_str_label = ttk.Label(part_f, text="0.00")
+        self._pspring_str_label.grid(row=8, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=8, column=4, sticky="e", **pad)
+        self._pspring_range_var = tk.DoubleVar(value=5.0)
+        ttk.Scale(part_f, from_=0.5, to=20.0, variable=self._pspring_range_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=8, column=5, **pad)
+
+        # Row 9: Coulomb force — enable + strength + range
+        self._pcoulomb_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Coulomb",
+                        variable=self._pcoulomb_enabled,
+                        command=self._send_particle_config).grid(
+            row=9, column=0, sticky="w", **pad
+        )
+        ttk.Label(part_f, text="Str:").grid(row=9, column=1, sticky="e", **pad)
+        self._pcoulomb_str_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=-5.0, to=5.0, variable=self._pcoulomb_str_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=9, column=2, **pad)
+        self._pcoulomb_str_label = ttk.Label(part_f, text="0.00")
+        self._pcoulomb_str_label.grid(row=9, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=9, column=4, sticky="e", **pad)
+        self._pcoulomb_range_var = tk.DoubleVar(value=10.0)
+        ttk.Scale(part_f, from_=0.5, to=30.0, variable=self._pcoulomb_range_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=9, column=5, **pad)
+
+        # Row 10: Scaffold attraction — enable + strength + range
+        self._pscaffold_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(part_f, text="Scaffold",
+                        variable=self._pscaffold_enabled,
+                        command=self._send_particle_config).grid(
+            row=10, column=0, sticky="w", **pad
+        )
+        ttk.Label(part_f, text="Str:").grid(row=10, column=1, sticky="e", **pad)
+        self._pscaffold_str_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(part_f, from_=0.0, to=5.0, variable=self._pscaffold_str_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=10, column=2, **pad)
+        self._pscaffold_str_label = ttk.Label(part_f, text="0.00")
+        self._pscaffold_str_label.grid(row=10, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=10, column=4, sticky="e", **pad)
+        self._pscaffold_range_var = tk.DoubleVar(value=10.0)
+        ttk.Scale(part_f, from_=0.5, to=30.0, variable=self._pscaffold_range_var,
+                  orient="horizontal", length=100,
+                  command=lambda *_: self._send_particle_config()).grid(row=10, column=5, **pad)
+
+        # Row 11: Text→Particles + Clear Particles + Pause Physics
         ttk.Button(part_f, text="Text → Particles",
-                   command=self._text_to_particles).grid(row=8, column=0, columnspan=2, **pad)
+                   command=self._text_to_particles).grid(row=11, column=0, columnspan=2, **pad)
         ttk.Button(part_f, text="Clear Particles",
-                   command=self._clear_particles).grid(row=8, column=2, **pad)
+                   command=self._clear_particles).grid(row=11, column=2, **pad)
         self._physics_paused = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Pause Physics", variable=self._physics_paused,
-                        command=self._toggle_physics_pause).grid(row=8, column=3, columnspan=2, sticky="w", **pad)
+                        command=self._toggle_physics_pause).grid(row=11, column=3, columnspan=2, sticky="w", **pad)
 
-        # Row 9: View transform — rotation + scale
-        ttk.Label(part_f, text="Rotate°:").grid(row=9, column=0, **pad)
+        # Row 12: View transform — rotation + scale
+        ttk.Label(part_f, text="Rotate°:").grid(row=12, column=0, **pad)
         self._protate_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-180.0, to=180.0, variable=self._protate_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_transform()).grid(row=9, column=1, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=12, column=1, **pad)
         self._protate_label = ttk.Label(part_f, text="0.0")
-        self._protate_label.grid(row=9, column=2, **pad)
+        self._protate_label.grid(row=12, column=2, **pad)
 
-        ttk.Label(part_f, text="Scale:").grid(row=9, column=3, **pad)
+        ttk.Label(part_f, text="Scale:").grid(row=12, column=3, **pad)
         self._pscale_var = tk.DoubleVar(value=1.0)
         ttk.Scale(part_f, from_=0.1, to=4.0, variable=self._pscale_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_transform()).grid(row=9, column=4, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=12, column=4, **pad)
         self._pscale_label = ttk.Label(part_f, text="1.0")
-        self._pscale_label.grid(row=9, column=5, **pad)
+        self._pscale_label.grid(row=12, column=5, **pad)
 
-        # Row 10: View transform — translate X/Y + reset
-        ttk.Label(part_f, text="Tx:").grid(row=10, column=0, **pad)
+        # Row 13: View transform — translate X/Y + reset
+        ttk.Label(part_f, text="Tx:").grid(row=13, column=0, **pad)
         self._ptx_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-16.0, to=16.0, variable=self._ptx_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_transform()).grid(row=10, column=1, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=13, column=1, **pad)
 
-        ttk.Label(part_f, text="Ty:").grid(row=10, column=2, **pad)
+        ttk.Label(part_f, text="Ty:").grid(row=13, column=2, **pad)
         self._pty_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-8.0, to=8.0, variable=self._pty_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_transform()).grid(row=10, column=3, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=13, column=3, **pad)
 
         ttk.Button(part_f, text="Reset Transform",
-                   command=self._reset_transform).grid(row=10, column=4, **pad)
+                   command=self._reset_transform).grid(row=13, column=4, **pad)
 
         # ── Actions frame ────────────────────────────────────
         act_f = ttk.LabelFrame(left_col, text="Actions")
@@ -539,6 +604,7 @@ class ScoreboardGUI:
                 "substepMs": 20,
                 "gravityScale": 18.0,
                 "gravityEnabled": True,
+                "collisionEnabled": True,
                 "elasticity": 0.92,
                 "wallElasticity": 0.78,
                 "damping": 0.9998,
@@ -550,6 +616,15 @@ class ScoreboardGUI:
                 "attractStrength": 0.0,
                 "attractRange": 3.0,
                 "speedColor": False,
+                "springStrength": 0.0,
+                "springRange": 5.0,
+                "springEnabled": False,
+                "coulombStrength": 0.0,
+                "coulombRange": 10.0,
+                "coulombEnabled": False,
+                "scaffoldStrength": 0.0,
+                "scaffoldRange": 10.0,
+                "scaffoldEnabled": False,
                 "physicsPaused": False,
                 "viewRotation": 0.0,
                 "viewScale": 1.0,
@@ -575,6 +650,7 @@ class ScoreboardGUI:
                 "substepMs": self._psubstep_var.get(),
                 "gravityScale": self._pgrav_var.get(),
                 "gravityEnabled": self._pgrav_enabled.get(),
+                "collisionEnabled": self._pcollision_enabled.get(),
                 "elasticity": self._pelast_var.get(),
                 "wallElasticity": self._pwelast_var.get(),
                 "damping": self._pdamping_var.get(),
@@ -586,6 +662,15 @@ class ScoreboardGUI:
                 "attractStrength": self._pattract_var.get(),
                 "attractRange": self._pattrange_var.get(),
                 "speedColor": self._pspeedcolor_var.get(),
+                "springStrength": self._pspring_str_var.get(),
+                "springRange": self._pspring_range_var.get(),
+                "springEnabled": self._pspring_enabled.get(),
+                "coulombStrength": self._pcoulomb_str_var.get(),
+                "coulombRange": self._pcoulomb_range_var.get(),
+                "coulombEnabled": self._pcoulomb_enabled.get(),
+                "scaffoldStrength": self._pscaffold_str_var.get(),
+                "scaffoldRange": self._pscaffold_range_var.get(),
+                "scaffoldEnabled": self._pscaffold_enabled.get(),
                 "physicsPaused": self._physics_paused.get(),
                 "viewRotation": self._protate_var.get(),
                 "viewScale": self._pscale_var.get(),
@@ -621,6 +706,7 @@ class ScoreboardGUI:
             self._psubstep_var.set(p["substepMs"])
             self._pgrav_var.set(p["gravityScale"])
             self._pgrav_enabled.set(p["gravityEnabled"])
+            self._pcollision_enabled.set(p["collisionEnabled"])
             self._pelast_var.set(p["elasticity"])
             self._pwelast_var.set(p["wallElasticity"])
             self._pdamping_var.set(p["damping"])
@@ -632,6 +718,15 @@ class ScoreboardGUI:
             self._pattract_var.set(p["attractStrength"])
             self._pattrange_var.set(p["attractRange"])
             self._pspeedcolor_var.set(p["speedColor"])
+            self._pspring_str_var.set(p.get("springStrength", 0.0))
+            self._pspring_range_var.set(p.get("springRange", 5.0))
+            self._pspring_enabled.set(p.get("springEnabled", False))
+            self._pcoulomb_str_var.set(p.get("coulombStrength", 0.0))
+            self._pcoulomb_range_var.set(p.get("coulombRange", 10.0))
+            self._pcoulomb_enabled.set(p.get("coulombEnabled", False))
+            self._pscaffold_str_var.set(p.get("scaffoldStrength", 0.0))
+            self._pscaffold_range_var.set(p.get("scaffoldRange", 10.0))
+            self._pscaffold_enabled.set(p.get("scaffoldEnabled", False))
             self._physics_paused.set(p.get("physicsPaused", False))
             self._protate_var.set(p.get("viewRotation", 0.0))
             self._pscale_var.set(p.get("viewScale", 1.0))
@@ -643,6 +738,9 @@ class ScoreboardGUI:
             self._psigma_label.config(text=f"{p['glowSigma']:.1f}")
             self._ptemp_label.config(text=f"{p['temperature']:.2f}")
             self._pattract_label.config(text=f"{p['attractStrength']:.2f}")
+            self._pspring_str_label.config(text=f"{p.get('springStrength', 0.0):.2f}")
+            self._pcoulomb_str_label.config(text=f"{p.get('coulombStrength', 0.0):.2f}")
+            self._pscaffold_str_label.config(text=f"{p.get('scaffoldStrength', 0.0):.2f}")
             self._pwavelength_label.config(text=f"{p['glowWavelength']:.1f}")
             self._protate_label.config(text=f"{p.get('viewRotation', 0.0):.1f}")
             self._pscale_label.config(text=f"{p.get('viewScale', 1.0):.2f}")
@@ -761,6 +859,9 @@ class ScoreboardGUI:
         self._psigma_label.config(text=f"{self._psigma_var.get():.1f}")
         self._ptemp_label.config(text=f"{self._ptemp_var.get():.2f}")
         self._pattract_label.config(text=f"{self._pattract_var.get():.2f}")
+        self._pspring_str_label.config(text=f"{self._pspring_str_var.get():.2f}")
+        self._pcoulomb_str_label.config(text=f"{self._pcoulomb_str_var.get():.2f}")
+        self._pscaffold_str_label.config(text=f"{self._pscaffold_str_var.get():.2f}")
         if self._loading: return
         if self._throttle_id is not None:
             self.root.after_cancel(self._throttle_id)
@@ -787,11 +888,24 @@ class ScoreboardGUI:
         damping = self._pdamping_var.get()
         wavelength = self._pwavelength_var.get()
         speedcol = 1 if self._pspeedcolor_var.get() else 0
+        spring_str = self._pspring_str_var.get()
+        spring_range = self._pspring_range_var.get()
+        spring_en = 1 if self._pspring_enabled.get() else 0
+        coulomb_str = self._pcoulomb_str_var.get()
+        coulomb_range = self._pcoulomb_range_var.get()
+        coulomb_en = 1 if self._pcoulomb_enabled.get() else 0
+        scaffold_str = self._pscaffold_str_var.get()
+        scaffold_range = self._pscaffold_range_var.get()
+        scaffold_en = 1 if self._pscaffold_enabled.get() else 0
+        collision_en = 1 if self._pcollision_enabled.get() else 0
         self._send(
             f"{self._disp_prefix()}/particles {count} {renderms} {grav:.2f} {elast:.2f} {welast:.2f}"
             f" {radius:.2f} {render} {sigma:.2f} {temp:.2f}"
             f" {attract:.2f} {att_range:.2f} {grav_en} {substep} {damping:.4f} {wavelength:.2f}"
-            f" {speedcol}"
+            f" {speedcol} {spring_str:.2f} {spring_range:.2f} {spring_en}"
+            f" {coulomb_str:.2f} {coulomb_range:.2f} {coulomb_en}"
+            f" {scaffold_str:.2f} {scaffold_range:.2f} {scaffold_en}"
+            f" {collision_en}"
         )
 
     def _clear_display(self):
@@ -802,9 +916,14 @@ class ScoreboardGUI:
 
     def _text_to_particles(self):
         self._send(f"{self._disp_prefix()}/text2particles")
-        # Reflect state change: particles on, physics paused (text stays as-is)
+        # Reflect state change: particles on, physics paused, scaffold spring on, collision off
         self._particles_enabled.set(True)
         self._physics_paused.set(True)
+        self._pcollision_enabled.set(False)
+        self._pscaffold_enabled.set(True)
+        self._pscaffold_str_var.set(1.0)
+        self._pscaffold_str_label.config(text="1.00")
+        self._pscaffold_range_var.set(10.0)
 
     def _on_text2particles_count(self, count):
         """Called on main thread when firmware reports TEXT2PARTICLES <count>."""
@@ -1023,6 +1142,7 @@ class ScoreboardGUI:
                 if "substepMs" in p: self._psubstep_var.set(p["substepMs"])
                 if "gravityScale" in p: self._pgrav_var.set(p["gravityScale"])
                 if "gravityEnabled" in p: self._pgrav_enabled.set(p["gravityEnabled"])
+                if "collisionEnabled" in p: self._pcollision_enabled.set(p["collisionEnabled"])
                 if "elasticity" in p: self._pelast_var.set(p["elasticity"])
                 if "wallElasticity" in p: self._pwelast_var.set(p["wallElasticity"])
                 if "damping" in p: self._pdamping_var.set(p["damping"])
@@ -1034,6 +1154,15 @@ class ScoreboardGUI:
                 if "attractRange" in p: self._pattrange_var.set(p["attractRange"])
                 if "glowWavelength" in p: self._pwavelength_var.set(p["glowWavelength"])
                 if "speedColor" in p: self._pspeedcolor_var.set(p["speedColor"])
+                if "springStrength" in p: self._pspring_str_var.set(p["springStrength"])
+                if "springRange" in p: self._pspring_range_var.set(p["springRange"])
+                if "springEnabled" in p: self._pspring_enabled.set(p["springEnabled"])
+                if "coulombStrength" in p: self._pcoulomb_str_var.set(p["coulombStrength"])
+                if "coulombRange" in p: self._pcoulomb_range_var.set(p["coulombRange"])
+                if "coulombEnabled" in p: self._pcoulomb_enabled.set(p["coulombEnabled"])
+                if "scaffoldStrength" in p: self._pscaffold_str_var.set(p["scaffoldStrength"])
+                if "scaffoldRange" in p: self._pscaffold_range_var.set(p["scaffoldRange"])
+                if "scaffoldEnabled" in p: self._pscaffold_enabled.set(p["scaffoldEnabled"])
 
             # Global scroll settings
             if "scrollSpeed" in d:
@@ -1054,6 +1183,7 @@ class ScoreboardGUI:
         self._psigma_label.config(text=f"{self._psigma_var.get():.1f}")
         self._ptemp_label.config(text=f"{self._ptemp_var.get():.2f}")
         self._pattract_label.config(text=f"{self._pattract_var.get():.2f}")
+        self._pspring_str_label.config(text=f"{self._pspring_str_var.get():.2f}")
         self._pwavelength_label.config(text=f"{self._pwavelength_var.get():.1f}")
 
     def _save_preset(self):
@@ -1113,6 +1243,13 @@ class ScoreboardGUI:
                 f" {p['temperature']:.2f} {p['attractStrength']:.2f} {p['attractRange']:.2f}"
                 f" {1 if p['gravityEnabled'] else 0} {p['substepMs']} {p['damping']:.4f}"
                 f" {p['glowWavelength']:.2f} {1 if p['speedColor'] else 0}"
+                f" {p.get('springStrength', 0.0):.2f} {p.get('springRange', 5.0):.2f}"
+                f" {1 if p.get('springEnabled', False) else 0}"
+                f" {p.get('coulombStrength', 0.0):.2f} {p.get('coulombRange', 10.0):.2f}"
+                f" {1 if p.get('coulombEnabled', False) else 0}"
+                f" {p.get('scaffoldStrength', 0.0):.2f} {p.get('scaffoldRange', 10.0):.2f}"
+                f" {1 if p.get('scaffoldEnabled', False) else 0}"
+                f" {1 if p.get('collisionEnabled', True) else 0}"
             )
 
     # ── ESP32 NVS save / load ─────────────────────────────────
@@ -1146,7 +1283,7 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_default_port()
 
     root = tk.Tk()
-    root.geometry("1280x820")
+    root.geometry("1600x820")
     app = ScoreboardGUI(root, initial_port=port)
 
     # Auto-connect if a port was found/specified

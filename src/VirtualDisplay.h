@@ -77,6 +77,22 @@ struct ParticleModeConfig {
     float   attractStrength = 0.0f;    // inter-particle attraction (0 = off)
     float   attractRange   = 3.0f;     // interaction range (× sum-of-radii)
     bool    gravityEnabled = true;
+    bool    collisionEnabled = true;     // hard-sphere collision
+
+    // Spring force (linear, charge-dependent)
+    float   springStrength = 0.0f;     // positive + same-sign charges → repulsion
+    float   springRange    = 5.0f;     // cutoff in absolute pixels
+    bool    springEnabled   = false;
+
+    // Coulomb force (1/r², charge-dependent)
+    float   coulombStrength = 0.0f;
+    float   coulombRange    = 10.0f;
+    bool    coulombEnabled  = false;
+
+    // Scaffold attraction (pulls particles toward origin positions)
+    float   scaffoldStrength = 0.0f;
+    float   scaffoldRange    = 10.0f;
+    bool    scaffoldEnabled  = false;
 
     // Rendering
     enum RenderStyle : uint8_t {
@@ -112,6 +128,16 @@ struct ParticleModeConfig {
         c.attractStrength = attractStrength;
         c.attractRange  = attractRange;
         c.gravityEnabled = gravityEnabled;
+        c.collisionEnabled = collisionEnabled;
+        c.springStrength = springStrength;
+        c.springRange    = springRange;
+        c.springEnabled  = springEnabled;
+        c.coulombStrength = coulombStrength;
+        c.coulombRange    = coulombRange;
+        c.coulombEnabled  = coulombEnabled;
+        c.scaffoldStrength = scaffoldStrength;
+        c.scaffoldRange    = scaffoldRange;
+        c.scaffoldEnabled  = scaffoldEnabled;
         return c;
     }
 };
@@ -194,9 +220,21 @@ public:
     /// particles with physics paused + glow.  Returns number of particles.
     uint16_t textToParticles();
 
+    /// Convert whatever is currently on the canvas into particles, preserving
+    /// each pixel's colour.  Does NOT re-render — captures the screen as-is.
+    /// Enables particles with physics paused + glow.  Returns particle count.
+    uint16_t screenToParticles();
+
     /// Set physics paused flag (freeze/unfreeze dynamics).
     void setPhysicsPaused(bool paused);
     bool physicsPaused() const { return _modeConfig.particles.physicsPaused; }
+
+    /// Restore particle positions (and zero velocities) from scaffold.
+    void restoreScaffoldPositions();
+    /// Restore particle colours from scaffold.
+    void restoreScaffoldColors();
+    /// True if a scaffold snapshot exists.
+    bool hasScaffold() const { return _particleSys.hasScaffold(); }
 
     /// View transform (modelview matrix — render-time only)
     void setParticleTransform(const ParticleTransform2D& t);

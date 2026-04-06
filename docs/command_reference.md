@@ -364,13 +364,29 @@ No arguments. Replies on serial with `ANIMATING 0` or `ANIMATING 1`.
 No arguments. Renders the current text on display _N_ into a GFX
 canvas, scans for lit pixels, and creates a particle at each one.
 The text layer is disabled, the particle layer is enabled with
-**physics paused** and glow rendering (σ = 0.6). The result is
-the text drawn as glowing particles, frozen in place.
+**physics paused** and glow rendering (σ = 0.6).
 
-To make the text "explode", resume physics afterwards:
+Physics defaults set at conversion time:
+
+- **Collision disabled** — particles don't bump each other away.
+- **Scaffold spring enabled** (strength 1.0, range 10) — each particle
+  is tethered to its original position by a spring force.
+- This means: if you resume physics with temperature > 0, the text
+  will wiggle but hold its shape. Disable the scaffold to let particles
+  scatter freely.
+
+To make the text "explode", disable scaffold and resume physics:
 
 ```
 /display/1/text2particles
+/display/1/particles/pause 0
+```
+
+To make the text wiggle but hold its shape:
+
+```
+/display/1/text2particles
+/display/1/particles 50 20 0.0 0.92 0.78 0.35 4 0.6 0.3
 /display/1/particles/pause 0
 ```
 
@@ -405,7 +421,367 @@ Useful for freeze-frame effects or when using `text2particles`.
 
 ---
 
-### `/clearall` or `/clear` — clear all displays
+### `/display/<N>/screen2particles` — capture screen to particles
+
+No arguments. Scans the current canvas buffer (whatever is rendered —
+text, particles, or any GFX drawing). Each lit pixel becomes a particle
+whose colour matches the original pixel. Physics is paused, glow
+rendering enabled (σ = 0.6). Collision is **disabled** and scaffold
+spring is **enabled** (strength 1.0) so particles stay in place.
+
+**Global form:** `/screen2particles` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/screen2particles
+```
+
+---
+
+### `/display/<N>/particles/restore` — restore scaffold positions
+
+No arguments. Resets all particles to their saved scaffold positions
+(the positions captured at `textToParticles` / `screenToParticles` /
+`init` time). Velocities are zeroed and physics is paused.
+
+**Global form:** `/particles/restore` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/restore
+```
+
+---
+
+### `/display/<N>/particles/restorecolors` — restore scaffold colours
+
+No arguments. Restores each particle's colour from its scaffold
+snapshot. Useful after `speedColor` has overwritten the original
+colours.
+
+**Global form:** `/particles/restorecolors` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/restorecolors
+```
+
+---
+
+### `/display/<N>/particles/enable` — enable / disable particle layer
+
+| Parameter | Type  | Description            |
+| --------- | ----- | ---------------------- |
+| arg 0     | `int` | `1` = enable, `0` = disable |
+
+**Global form:** `/particles/enable 1` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/enable 1
+```
+
+---
+
+### `/display/<N>/text/enable` — enable / disable text layer
+
+| Parameter | Type  | Description            |
+| --------- | ----- | ---------------------- |
+| arg 0     | `int` | `1` = enable, `0` = disable |
+
+**Global form:** `/text/enable 1` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/text/enable 0
+```
+
+---
+
+### `/display/<N>/particles/brightness` — particle layer brightness
+
+| Parameter | Type  | Description          |
+| --------- | ----- | -------------------- |
+| arg 0     | `int` | Brightness (0 – 255) |
+
+**Global form:** `/particles/brightness 128` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/brightness 128
+```
+
+---
+
+### `/display/<N>/text/brightness` — text layer brightness
+
+| Parameter | Type  | Description          |
+| --------- | ----- | -------------------- |
+| arg 0     | `int` | Brightness (0 – 255) |
+
+**Global form:** `/text/brightness 200` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/text/brightness 200
+```
+
+---
+
+### `/display/<N>/particles/color` — particle colour
+
+| Parameter | Type  | Description     |
+| --------- | ----- | --------------- |
+| arg 0     | `int` | Red (0 – 255)   |
+| arg 1     | `int` | Green (0 – 255) |
+| arg 2     | `int` | Blue (0 – 255)  |
+
+Sets the default colour for new particles on display _N_.
+
+**Global form:** `/particles/color 255 128 0` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/color 255 128 0
+```
+
+---
+
+### `/display/<N>/particles` — particle physics configuration
+
+Up to **26 positional arguments**, all optional. Missing args keep
+their current values. This is the main command for tuning the
+particle physics engine at runtime.
+
+| Arg | Name              | Type    | Default | Description                                           |
+| --- | ----------------- | ------- | ------- | ----------------------------------------------------- |
+| 0   | count             | `int`   | 6       | Number of particles                                   |
+| 1   | renderMs          | `int`   | 20      | Canvas redraw interval (ms)                            |
+| 2   | gravityScale      | `float` | 18.0    | Multiplier for IMU gravity input                       |
+| 3   | elasticity        | `float` | 0.92    | Particle-particle bounce coefficient (0–1)             |
+| 4   | wallElasticity    | `float` | 0.78    | Wall bounce coefficient (0–1)                          |
+| 5   | radius            | `float` | 0.45    | Collision & rendering radius (pixels)                  |
+| 6   | renderStyle       | `int`   | 4       | 0=point, 1=square, 2=circle, 3=text, 4=glow           |
+| 7   | glowSigma         | `float` | 1.2     | Gaussian glow envelope sigma (pixels)                  |
+| 8   | temperature       | `float` | 0.0     | Langevin jitter magnitude                              |
+| 9   | attractStrength   | `float` | 0.0     | Inter-particle attraction strength (0 = off)           |
+| 10  | attractRange      | `float` | 3.0     | Attraction range (× sum-of-radii)                      |
+| 11  | gravityEnabled    | `int`   | 1       | 0 = off, 1 = on                                       |
+| 12  | substepMs         | `int`   | 20      | Max physics sub-step (ms, lower = more stable)         |
+| 13  | damping           | `float` | 0.9998  | Per-substep velocity multiplier (1 = none)             |
+| 14  | glowWavelength    | `float` | 0.0     | Interference wavelength (0 = pure glow, >0 = ripples) |
+| 15  | speedColor        | `int`   | 0       | Colour from velocity heatmap: 0/1                      |
+| 16  | springStrength    | `float` | 0.0     | Linear spring force strength (charge-dependent)        |
+| 17  | springRange       | `float` | 5.0     | Spring force cutoff distance (pixels)                  |
+| 18  | springEnabled     | `int`   | 0       | Enable spring force: 0/1                               |
+| 19  | coulombStrength   | `float` | 0.0     | Coulomb 1/r² force strength (charge-dependent)         |
+| 20  | coulombRange      | `float` | 10.0    | Coulomb force cutoff distance (pixels)                 |
+| 21  | coulombEnabled    | `int`   | 0       | Enable Coulomb force: 0/1                              |
+| 22  | scaffoldStrength  | `float` | 0.0     | Spring pull toward scaffold origin positions           |
+| 23  | scaffoldRange     | `float` | 10.0    | Scaffold force max effective range (pixels)            |
+| 24  | scaffoldEnabled   | `int`   | 0       | Enable scaffold attraction: 0/1                        |
+| 25  | collisionEnabled  | `int`   | 1       | Enable hard-sphere collision: 0/1                      |
+
+#### Force model summary
+
+| Force     | Law              | Scope            | Depends on charge? |
+| --------- | ---------------- | ---------------- | ------------------ |
+| Collision | Hard-sphere      | Inter-particle   | No                 |
+| Attract   | Linear (fades)   | Inter-particle   | No                 |
+| Spring    | Linear           | Inter-particle   | Yes (q₁ × q₂)     |
+| Coulomb   | Inverse-square   | Inter-particle   | Yes (q₁ × q₂)     |
+| Scaffold  | Linear spring    | Particle→origin  | No                 |
+
+**Serial examples:**
+
+```
+# Create 50 particles, glow render, radius 0.3
+/display/1/particles 50 20 18.0 0.92 0.78 0.3 4 1.2
+
+# Enable scaffold spring (args 22-24) and disable collision (arg 25)
+/display/1/particles 50 20 18.0 0.92 0.78 0.3 4 1.2 0.0 0.0 3.0 1 20 0.9998 0.0 0 0.0 5.0 0 0.0 10.0 0 1.0 10.0 1 0
+```
+
+---
+
+### `/display/<N>/particles/transform` — set full view transform
+
+| Parameter | Type    | Description               |
+| --------- | ------- | ------------------------- |
+| arg 0     | `float` | Rotation angle (degrees)  |
+| arg 1     | `float` | Scale X                   |
+| arg 2     | `float` | Scale Y                   |
+| arg 3     | `float` | Translate X (pixels)      |
+| arg 4     | `float` | Translate Y (pixels)      |
+
+Render-time only — physics coordinates are not affected.
+Transform is applied as scale → rotate → translate around display centre.
+
+**Serial:**
+
+```
+/display/1/particles/transform 45.0 1.5 1.5 0.0 0.0
+```
+
+---
+
+### `/display/<N>/particles/rotate` — rotation only
+
+| Parameter | Type    | Description              |
+| --------- | ------- | ------------------------ |
+| arg 0     | `float` | Angle in degrees         |
+
+**Global form:** `/particles/rotate 30.0` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/rotate 45.0
+```
+
+---
+
+### `/display/<N>/particles/scale` — scale only
+
+| Parameter | Type    | Description               |
+| --------- | ------- | ------------------------- |
+| arg 0     | `float` | Scale X (and Y if 1 arg) |
+| arg 1     | `float` | Scale Y (optional)        |
+
+If only one argument is given, it applies to both axes.
+
+**Global form:** `/particles/scale 2.0` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/scale 1.5 1.5
+```
+
+---
+
+### `/display/<N>/particles/translate` — translate only
+
+| Parameter | Type    | Description          |
+| --------- | ------- | -------------------- |
+| arg 0     | `float` | X offset (pixels)    |
+| arg 1     | `float` | Y offset (pixels)    |
+
+**Global form:** `/particles/translate 5.0 0.0` — all displays.
+
+**Serial:**
+
+```
+/display/1/particles/translate 3.0 -1.0
+```
+
+---
+
+### `/display/<N>/particles/resettransform` — reset view to identity
+
+No arguments. Resets rotation, scale, and translation to defaults.
+
+**Global form:** `/particles/resettransform` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/particles/resettransform
+```
+
+---
+
+### `/display/<N>/text/push` — push text to stack
+
+| Parameter | Type     | Description      |
+| --------- | -------- | ---------------- |
+| arg 0     | `string` | Text to push     |
+
+Appends text to the display's text stack (used by RENDER_TEXT particle mode
+and scroll continuous mode).
+
+**Global form:** `/text/push "HELLO"` — applies to all displays.
+
+**Serial:**
+
+```
+/display/1/text/push "HELLO"
+```
+
+---
+
+### `/display/<N>/text/pop` — pop last text from stack
+
+No arguments. Removes the last entry from the text stack.
+
+**Global form:** `/text/pop` — applies to all displays.
+
+---
+
+### `/display/<N>/text/set` — set stack entry at index
+
+| Parameter | Type     | Description          |
+| --------- | -------- | -------------------- |
+| arg 0     | `int`    | Stack index (0-based)|
+| arg 1     | `string` | Text to set          |
+
+**Global form:** `/text/set 0 "NEW"` — applies to all displays.
+
+---
+
+### `/display/<N>/text/clear` — clear text stack
+
+No arguments. Removes all entries from the text stack.
+
+**Global form:** `/text/clear` — applies to all displays.
+
+---
+
+### `/display/<N>/text/list` — print text stack to serial
+
+No arguments. Outputs the text stack contents to serial for debugging.
+
+**Global form:** `/text/list` — applies to all displays.
+
+---
+
+### `/scrollcontinuous` — auto-cycle text stack in scroll mode
+
+| Parameter | Type  | Description                   |
+| --------- | ----- | ----------------------------- |
+| arg 0     | `int` | `0` = off (default), `1` = on |
+
+When enabled, scroll mode automatically cycles through all text
+stack entries in sequence.
+
+**Serial:**
+
+```
+/scrollcontinuous 1
+```
+
+---
+
+### `/defaults` — reset all parameters
+
+No arguments. Resets all runtime parameters (all displays) back to
+their compiled defaults.
+
+**Serial:**
+
+```
+/defaults
+```
+
+---
 
 No arguments. Turns off all LEDs on all six displays.
 

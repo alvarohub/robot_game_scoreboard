@@ -26,6 +26,22 @@ struct ParticleSystemConfig {
     float   attractStrength = 0.0f; // inter-particle attraction (0 = off)
     float   attractRange = 3.0f;    // interaction range (× sum-of-radii)
     bool    gravityEnabled = true;
+    bool    collisionEnabled = true;  // hard-sphere collision (position correction + bounce)
+
+    // Spring force (linear, charge-dependent)
+    float   springStrength = 0.0f;  // positive + same-sign charges → repulsion
+    float   springRange    = 5.0f;  // cutoff distance in absolute pixels
+    bool    springEnabled   = false;
+
+    // Coulomb force (1/r², charge-dependent)
+    float   coulombStrength = 0.0f; // positive + same-sign charges → repulsion
+    float   coulombRange    = 10.0f; // cutoff distance in absolute pixels
+    bool    coulombEnabled  = false;
+
+    // Scaffold attraction (pull particles toward their origin positions)
+    float   scaffoldStrength = 0.0f; // spring-like pull toward scaffold pos
+    float   scaffoldRange    = 10.0f; // max effective range (pixels)
+    bool    scaffoldEnabled  = false;
 };
 
 // ── Single particle ──────────────────────────────────────────
@@ -36,6 +52,20 @@ struct Particle {
     Vec2f accel;      // accumulated acceleration this step
     float radius;     // individual radius
     uint16_t color;   // RGB565 per-particle colour
+    float charge;     // sensitivity to charge-based forces (0 = insensitive)
+    int16_t originIdx; // index into scaffold (-1 = none)
+};
+
+// ── Scaffold: snapshot of initial particle state ─────────────
+//  Saved automatically on every init / initFromPositions call.
+//  Useful for: restoring colours after speedColor, attracting
+//  particles back to original positions, reset effects, etc.
+
+struct ParticleScaffold {
+    Vec2f    pos;
+    float    radius;
+    uint16_t color;
+    float    charge;
 };
 
 // ── System ───────────────────────────────────────────────────
@@ -76,6 +106,21 @@ public:
     const Particle& particle(uint16_t i)    const { return _particles[i]; }
     Particle&       particle(uint16_t i)          { return _particles[i]; }
 
+    // ── Scaffold (initial state snapshot) ────────────────────
+    /// Read-only access to the scaffold saved at init time.
+    bool hasScaffold() const { return _hasScaffold; }
+    const ParticleScaffold& scaffold(uint16_t i) const { return _scaffold[i]; }
+
+    /// Re-snapshot current particle state as the scaffold
+    /// (call after externally modifying colors, e.g. screenToParticles).
+    void saveScaffold() { _saveScaffold(); }
+
+    /// Restore per-particle colours from the scaffold.
+    void restoreColorsFromScaffold();
+
+    /// Restore per-particle positions (and zero velocities) from scaffold.
+    void restorePositionsFromScaffold();
+
     /// Bounds used by the system
     float boundsW() const { return _boundsW; }
     float boundsH() const { return _boundsH; }
@@ -83,8 +128,10 @@ public:
 private:
     ParticleSystemConfig _config;
     Particle _particles[MAX_PARTICLES];
+    ParticleScaffold _scaffold[MAX_PARTICLES];
     uint16_t _count = 0;
     bool     _initialised = false;
+    bool     _hasScaffold = false;
 
     // World
     float _boundsW = 32.0f;
@@ -96,5 +143,30 @@ private:
     void _applyGravity();
     void _integrate(float dt);
     void _constrainWalls();
-    void _resolveCollisions();
+    void _interParticleInteraction();
+    void _scaffoldInteraction();
+    void _saveScaffold();
+
+    // ── Per-force methods (called from interaction loops) ─────
+    // Each takes pre-computed pair geometry so distances are computed once.
+    // Can also be called for particle→scaffold or particle→point forces.
+
+    /// Hard-sphere collision: position correction + elastic bounce.
+    void _applyCollision(Particle& a, Particle& b,
+                         Vec2f normal, float dist, float minDist);
+
+    /// Short-range attraction: linear pull strongest at contact, zero at attractDist.
+    void _applyAttraction(Particle& a, Particle& b,
+                          Vec2f normal, float dist, float minDist,
+                          float attractDist);
+
+    /// Spring force: linear, charge-dependent.
+    /// F = springStrength × qA × qB × (1 − dist/range).
+    void _applySpringForce(Particle& a, Particle& b,
+                           Vec2f normal, float dist);
+
+    /// Coulomb force: 1/r², charge-dependent.
+    /// F = coulombStrength × qA × qB / dist².
+    void _applyCoulombForce(Particle& a, Particle& b,
+                            Vec2f normal, float dist);
 };

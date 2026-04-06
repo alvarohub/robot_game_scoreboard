@@ -38,9 +38,12 @@ void ParticleSystem::init(float boundsW, float boundsH, uint16_t defaultColor) {
         p.accel  = Vec2f{0, 0};
         p.radius = _config.radius;
         p.color  = defaultColor;
+        p.charge = 1.0f;
+        p.originIdx = -1;  // grid-init: no scaffold link
     }
 
     _initialised = true;
+    _saveScaffold();
 }
 
 void ParticleSystem::initFromPositions(const Vec2f* positions, uint16_t count,
@@ -58,8 +61,39 @@ void ParticleSystem::initFromPositions(const Vec2f* positions, uint16_t count,
         p.accel  = Vec2f{0, 0};
         p.radius = radius;
         p.color  = color;
+        p.charge = 1.0f;
+        p.originIdx = i;  // particle i ↔ scaffold i
     }
     _initialised = true;
+    _saveScaffold();
+}
+
+// ── Scaffold ─────────────────────────────────────────────────
+
+void ParticleSystem::_saveScaffold() {
+    for (uint16_t i = 0; i < _count; i++) {
+        _scaffold[i].pos    = _particles[i].pos;
+        _scaffold[i].radius = _particles[i].radius;
+        _scaffold[i].color  = _particles[i].color;
+        _scaffold[i].charge = _particles[i].charge;
+    }
+    _hasScaffold = true;
+}
+
+void ParticleSystem::restoreColorsFromScaffold() {
+    if (!_hasScaffold) return;
+    for (uint16_t i = 0; i < _count; i++) {
+        _particles[i].color = _scaffold[i].color;
+    }
+}
+
+void ParticleSystem::restorePositionsFromScaffold() {
+    if (!_hasScaffold) return;
+    for (uint16_t i = 0; i < _count; i++) {
+        _particles[i].pos = _scaffold[i].pos;
+        _particles[i].vel = Vec2f{0, 0};
+        _particles[i].accel = Vec2f{0, 0};
+    }
 }
 
 // ── Configuration ────────────────────────────────────────────
@@ -111,7 +145,8 @@ void ParticleSystem::_substep(float dt) {
     _applyGravity();
     _integrate(dt);
     _constrainWalls();
-    _resolveCollisions();
+    _interParticleInteraction();
+    _scaffoldInteraction();
 }
 
 void ParticleSystem::_applyGravity() {
@@ -174,9 +209,19 @@ void ParticleSystem::_constrainWalls() {
     }
 }
 
-void ParticleSystem::_resolveCollisions() {
-    // Interaction range for attraction (in absolute pixels)
+void ParticleSystem::_interParticleInteraction() {
+    // Which forces are active this frame?
+    bool doCollide = _config.collisionEnabled;
     bool doAttract = (_config.attractStrength > 0.0f);
+    bool doSpring  = (_config.springEnabled && _config.springRange > 0.0f);
+    bool doCoulomb = (_config.coulombEnabled && _config.coulombRange > 0.0f);
+
+    // Early-out if nothing is active
+    if (!doCollide && !doAttract && !doSpring && !doCoulomb) return;
+
+    // Pre-compute squared cutoffs (collision/attract depend on radii per-pair)
+    float springRangeSq  = _config.springRange  * _config.springRange;
+    float coulombRangeSq = _config.coulombRange * _config.coulombRange;
 
     for (uint16_t i = 0; i < _count; i++) {
         for (uint16_t j = i + 1; j < _count; j++) {
@@ -187,12 +232,20 @@ void ParticleSystem::_resolveCollisions() {
             float minDist = a.radius + b.radius;
             float distSq  = delta.lengthSq();
 
-            // Attraction range = minDist * attractRange
-            float attractDist = minDist * _config.attractRange;
+            // Per-pair attraction range
+            float attractDist   = minDist * _config.attractRange;
             float attractDistSq = attractDist * attractDist;
 
-            // Skip if beyond both collision and attraction range
-            if (distSq >= attractDistSq && distSq >= minDist * minDist) continue;
+            // Outer cull: skip if beyond all active interaction ranges
+            float cullSq = 0.0f;
+            float minDistSq = minDist * minDist;
+            if (doCollide || doAttract) {
+                cullSq = minDistSq;
+                if (doAttract && attractDistSq > cullSq)  cullSq = attractDistSq;
+            }
+            if (doSpring  && springRangeSq  > cullSq) cullSq = springRangeSq;
+            if (doCoulomb && coulombRangeSq > cullSq)  cullSq = coulombRangeSq;
+            if (distSq >= cullSq) continue;
 
             // Degenerate case: particles exactly overlapping
             if (distSq < 1e-6f) {
@@ -200,35 +253,115 @@ void ParticleSystem::_resolveCollisions() {
                 distSq = delta.lengthSq();
             }
 
-            float dist    = sqrtf(distSq);
-            Vec2f normal  = delta / dist;
+            float dist   = sqrtf(distSq);
+            Vec2f normal = delta / dist;
 
-            if (dist < minDist) {
-                // ── Contact: position correction + elastic bounce ──
-                float overlap = minDist - dist;
-                a.pos -= normal * (overlap * 0.5f);
-                b.pos += normal * (overlap * 0.5f);
-
-                Vec2f relVel = b.vel - a.vel;
-                float normSpeed = relVel.dot(normal);
-
-                if (normSpeed < 0.0f) {
-                    float impulse = -(1.0f + _config.elasticity) * normSpeed * 0.5f;
-                    Vec2f imp = normal * impulse;
-                    a.vel -= imp;
-                    b.vel += imp;
-                }
+            // ── Dispatch to per-force methods ──
+            if (doCollide && dist < minDist) {
+                _applyCollision(a, b, normal, dist, minDist);
+            } else if (doAttract && dist < attractDist) {
+                _applyAttraction(a, b, normal, dist, minDist, attractDist);
             }
-            else if (doAttract && dist < attractDist) {
-                // ── Attraction: linear spring pull ──
-                // Force strongest at contact (t=0), fades to 0 at attractDist (t=1)
-                float t = (dist - minDist) / (attractDist - minDist);
-                float force = _config.attractStrength * (1.0f - t);
-                // Apply as velocity impulse (equal mass, symmetric)
-                Vec2f pull = normal * force;
-                a.vel += pull;
-                b.vel -= pull;
+
+            if (doSpring && dist < _config.springRange) {
+                _applySpringForce(a, b, normal, dist);
+            }
+
+            if (doCoulomb && dist < _config.coulombRange) {
+                _applyCoulombForce(a, b, normal, dist);
             }
         }
+    }
+}
+
+// ── Per-force methods ────────────────────────────────────────
+
+void ParticleSystem::_applyCollision(Particle& a, Particle& b,
+                                     Vec2f normal, float dist, float minDist) {
+    // Position correction: push apart by half the overlap each
+    float overlap = minDist - dist;
+    a.pos -= normal * (overlap * 0.5f);
+    b.pos += normal * (overlap * 0.5f);
+
+    // Elastic bounce along collision normal
+    Vec2f relVel = b.vel - a.vel;
+    float normSpeed = relVel.dot(normal);
+
+    if (normSpeed < 0.0f) {
+        float impulse = -(1.0f + _config.elasticity) * normSpeed * 0.5f;
+        Vec2f imp = normal * impulse;
+        a.vel -= imp;
+        b.vel += imp;
+    }
+}
+
+void ParticleSystem::_applyAttraction(Particle& a, Particle& b,
+                                      Vec2f normal, float dist, float minDist,
+                                      float attractDist) {
+    // Linear pull: strongest at contact (t=0), fades to 0 at attractDist (t=1)
+    float t = (dist - minDist) / (attractDist - minDist);
+    float force = _config.attractStrength * (1.0f - t);
+    Vec2f pull = normal * force;
+    a.vel += pull;
+    b.vel -= pull;
+}
+
+void ParticleSystem::_applySpringForce(Particle& a, Particle& b,
+                                       Vec2f normal, float dist) {
+    // Linear spring: F = springStrength × qA × qB × (1 − dist/range)
+    // Positive product → repulsion (pushes apart); negative → attraction.
+    if (a.charge == 0.0f || b.charge == 0.0f) return;
+    float t = dist / _config.springRange;  // 0 at overlap, 1 at range
+    float force = _config.springStrength * a.charge * b.charge * (1.0f - t);
+    Vec2f imp = normal * force;
+    a.vel -= imp;   // positive force → a pushed away from b
+    b.vel += imp;   // symmetric
+}
+
+void ParticleSystem::_applyCoulombForce(Particle& a, Particle& b,
+                                        Vec2f normal, float dist) {
+    // Coulomb: F = coulombStrength × qA × qB / dist²
+    // Positive product → repulsion; negative → attraction.
+    // Clamped to avoid explosion at very small distances.
+    if (a.charge == 0.0f || b.charge == 0.0f) return;
+    float distClamped = (dist < 0.5f) ? 0.5f : dist;  // prevent singularity
+    float force = _config.coulombStrength * a.charge * b.charge
+                  / (distClamped * distClamped);
+    Vec2f imp = normal * force;
+    a.vel -= imp;
+    b.vel += imp;
+}
+
+// ── Scaffold interaction ────────────────────────────────────
+//  Each particle with a valid originIdx is pulled toward its
+//  scaffold position by a linear spring: strongest at range,
+//  zero when already at the origin.  Particles without a
+//  scaffold link (originIdx == -1) are unaffected.
+
+void ParticleSystem::_scaffoldInteraction() {
+    if (!_config.scaffoldEnabled || !_hasScaffold) return;
+
+    float rangeSq = _config.scaffoldRange * _config.scaffoldRange;
+
+    for (uint16_t i = 0; i < _count; i++) {
+        Particle& p = _particles[i];
+        if (p.originIdx < 0 || p.originIdx >= (int16_t)_count) continue;
+
+        Vec2f target = _scaffold[p.originIdx].pos;
+        Vec2f delta  = target - p.pos;
+        float distSq = delta.lengthSq();
+
+        if (distSq < 1e-6f) continue;          // already at origin
+        if (distSq > rangeSq) distSq = rangeSq; // clamp for force cap
+
+        float dist = sqrtf(distSq);
+
+        // Linear spring toward origin: force grows with distance
+        // F = scaffoldStrength × (dist / scaffoldRange)
+        // At dist=0 → no pull; at dist=range → full strength.
+        Vec2f normal = delta / dist;
+        float t = dist / _config.scaffoldRange;
+        float force = _config.scaffoldStrength * t;
+        p.vel += normal * force;
     }
 }
