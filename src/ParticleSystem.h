@@ -25,6 +25,7 @@ struct ParticleSystemConfig {
     float   temperature  = 0.0f;   // Langevin jitter magnitude
     float   attractStrength = 0.0f; // inter-particle attraction (0 = off)
     float   attractRange = 3.0f;    // interaction range (× sum-of-radii)
+    bool    attractEnabled = true;
     bool    gravityEnabled = true;
     bool    collisionEnabled = true;  // hard-sphere collision (position correction + bounce)
 

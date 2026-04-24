@@ -18,6 +18,7 @@
 #include <Preferences.h>
 #include "config.h"
 #include "VirtualDisplay.h"
+#include "Animations.h"
 
 class DisplayManager {
 public:
@@ -67,8 +68,20 @@ public:
 
     /// Save current display params (brightness, color, mode, particles) to NVS.
     void saveParams();
+    /// Save current params to NVS bank [1..NVS_BANK_COUNT].
+    void saveParams(uint8_t bank);
     /// Load display params from NVS and apply them.
     void loadParams();
+    /// Load params from NVS bank [1..NVS_BANK_COUNT].
+    void loadParams(uint8_t bank);
+    /// Set which bank is loaded at startup.
+    void setStartupBank(uint8_t bank);
+    /// Current startup bank index [1..NVS_BANK_COUNT].
+    uint8_t startupBank() const;
+    /// Load startup bank. Called during setup once boot visuals are done.
+    void loadStartupParams();
+    /// Debounced autosave for the startup bank after live state changes.
+    void schedulePersist();
 
     /// Call every loop iteration — updates all VirtualDisplays,
     /// composites them, and pushes pixels to the strip.
@@ -99,6 +112,21 @@ public:
     /// Direct access to a VirtualDisplay (for advanced GFX operations).
     VirtualDisplay* getDisplay(uint8_t idx);
 
+    /// Serialize one display's current runtime state as JSON.
+    void printDisplayState(uint8_t displayIndex, Print& out) const;
+
+    /// Emit one display's current runtime state on Serial as DISPLAY_STATE JSON.
+    void notifyDisplayState(uint8_t displayIndex) const;
+
+    /// Select animation script for one/all displays (0 = off).
+    void setAnimation(uint8_t displayIndex, uint8_t animationId);
+    uint8_t animationId(uint8_t displayIndex) const;
+    const char* animationName(uint8_t displayIndex) const;
+    void startAnimation(uint8_t displayIndex);
+    void setAnimationAll(uint8_t animationId);
+    void stopAnimation(uint8_t displayIndex);
+    void stopAnimationAll();
+
 private:
     Adafruit_NeoMatrix _matrix;
     VirtualDisplay*    _vDisplays[NUM_DISPLAYS];
@@ -106,10 +134,39 @@ private:
     bool               _needsUpdate;
     uint8_t            _brightness = DEFAULT_BRIGHTNESS;
     Preferences        _prefs;
-#ifdef USE_M5UNIFIED
+    bool               _persistDirty = false;
+    bool               _persistenceSuspended = false;
+    unsigned long      _persistDueMs = 0;
+#if SCOREBOARD_HAS_M5UNIFIED
     bool               _imuAvailable = false;
 #endif
 
+    static constexpr uint8_t NVS_BANK_COUNT = 5;
+    static constexpr unsigned long PERSIST_DEBOUNCE_MS = 800;
+
+    struct AnimationRuntime {
+        uint8_t selectedId = 0;      // script selected for this display
+        bool running = false;
+        uint8_t step = 0;
+        unsigned long stepStartedMs = 0;
+        uint8_t triggeredTextIndex = 0;
+        int16_t gotoSourceStep = -1; // step currently managing finite goto count
+        int16_t gotoRemaining = 0;   // remaining finite jumps for gotoSourceStep
+    };
+    AnimationRuntime _anim[NUM_DISPLAYS];
+
     /// Blit all VirtualDisplay canvases onto the physical NeoMatrix.
     void _render();
+    void _persistIfDue();
+    bool _saveAutoState();
+    bool _loadAutoState();
+
+    uint8_t _clampBank(uint8_t bank) const;
+    bool _makeBankKey(const char* base, uint8_t bank, char* out, size_t outLen) const;
+
+    void _onTextSet(uint8_t displayIndex);
+    void _startAnimation(uint8_t displayIndex);
+    void _stopAnimation(uint8_t displayIndex);
+    void _tickAnimations();
+    void _applyAnimationStep(uint8_t displayIndex, const AnimationStep& step);
 };

@@ -473,8 +473,8 @@ colours.
 
 ### `/display/<N>/particles/enable` — enable / disable particle layer
 
-| Parameter | Type  | Description            |
-| --------- | ----- | ---------------------- |
+| Parameter | Type  | Description                 |
+| --------- | ----- | --------------------------- |
 | arg 0     | `int` | `1` = enable, `0` = disable |
 
 **Global form:** `/particles/enable 1` — applies to all displays.
@@ -489,8 +489,8 @@ colours.
 
 ### `/display/<N>/text/enable` — enable / disable text layer
 
-| Parameter | Type  | Description            |
-| --------- | ----- | ---------------------- |
+| Parameter | Type  | Description                 |
+| --------- | ----- | --------------------------- |
 | arg 0     | `int` | `1` = enable, `0` = disable |
 
 **Global form:** `/text/enable 1` — applies to all displays.
@@ -561,44 +561,44 @@ Up to **26 positional arguments**, all optional. Missing args keep
 their current values. This is the main command for tuning the
 particle physics engine at runtime.
 
-| Arg | Name              | Type    | Default | Description                                           |
-| --- | ----------------- | ------- | ------- | ----------------------------------------------------- |
-| 0   | count             | `int`   | 6       | Number of particles                                   |
-| 1   | renderMs          | `int`   | 20      | Canvas redraw interval (ms)                            |
-| 2   | gravityScale      | `float` | 18.0    | Multiplier for IMU gravity input                       |
-| 3   | elasticity        | `float` | 0.92    | Particle-particle bounce coefficient (0–1)             |
-| 4   | wallElasticity    | `float` | 0.78    | Wall bounce coefficient (0–1)                          |
-| 5   | radius            | `float` | 0.45    | Collision & rendering radius (pixels)                  |
-| 6   | renderStyle       | `int`   | 4       | 0=point, 1=square, 2=circle, 3=text, 4=glow           |
-| 7   | glowSigma         | `float` | 1.2     | Gaussian glow envelope sigma (pixels)                  |
-| 8   | temperature       | `float` | 0.0     | Langevin jitter magnitude                              |
-| 9   | attractStrength   | `float` | 0.0     | Inter-particle attraction strength (0 = off)           |
-| 10  | attractRange      | `float` | 3.0     | Attraction range (× sum-of-radii)                      |
-| 11  | gravityEnabled    | `int`   | 1       | 0 = off, 1 = on                                       |
-| 12  | substepMs         | `int`   | 20      | Max physics sub-step (ms, lower = more stable)         |
-| 13  | damping           | `float` | 0.9998  | Per-substep velocity multiplier (1 = none)             |
-| 14  | glowWavelength    | `float` | 0.0     | Interference wavelength (0 = pure glow, >0 = ripples) |
-| 15  | speedColor        | `int`   | 0       | Colour from velocity heatmap: 0/1                      |
-| 16  | springStrength    | `float` | 0.0     | Linear spring force strength (charge-dependent)        |
-| 17  | springRange       | `float` | 5.0     | Spring force cutoff distance (pixels)                  |
-| 18  | springEnabled     | `int`   | 0       | Enable spring force: 0/1                               |
-| 19  | coulombStrength   | `float` | 0.0     | Coulomb 1/r² force strength (charge-dependent)         |
-| 20  | coulombRange      | `float` | 10.0    | Coulomb force cutoff distance (pixels)                 |
-| 21  | coulombEnabled    | `int`   | 0       | Enable Coulomb force: 0/1                              |
-| 22  | scaffoldStrength  | `float` | 0.0     | Spring pull toward scaffold origin positions           |
-| 23  | scaffoldRange     | `float` | 10.0    | Scaffold force max effective range (pixels)            |
-| 24  | scaffoldEnabled   | `int`   | 0       | Enable scaffold attraction: 0/1                        |
-| 25  | collisionEnabled  | `int`   | 1       | Enable hard-sphere collision: 0/1                      |
+| Arg | Name             | Type    | Default | Description                                           |
+| --- | ---------------- | ------- | ------- | ----------------------------------------------------- |
+| 0   | count            | `int`   | 6       | Number of particles                                   |
+| 1   | renderMs         | `int`   | 20      | Canvas redraw interval (ms)                           |
+| 2   | gravityScale     | `float` | 18.0    | Multiplier for IMU gravity input                      |
+| 3   | elasticity       | `float` | 0.92    | Particle-particle bounce coefficient (0–1)            |
+| 4   | wallElasticity   | `float` | 0.78    | Wall bounce coefficient (0–1)                         |
+| 5   | radius           | `float` | 0.45    | Collision & rendering radius (pixels)                 |
+| 6   | renderStyle      | `int`   | 4       | 0=point, 1=square, 2=circle, 3=text, 4=glow           |
+| 7   | glowSigma        | `float` | 1.2     | Gaussian glow envelope sigma (pixels)                 |
+| 8   | temperature      | `float` | 0.0     | Langevin jitter magnitude                             |
+| 9   | attractStrength  | `float` | 0.0     | Inter-particle attraction strength (0 = off)          |
+| 10  | attractRange     | `float` | 3.0     | Attraction range (× sum-of-radii)                     |
+| 11  | gravityEnabled   | `int`   | 1       | 0 = off, 1 = on                                       |
+| 12  | substepMs        | `int`   | 20      | Max physics sub-step (ms, lower = more stable)        |
+| 13  | damping          | `float` | 0.9998  | Per-substep velocity multiplier (1 = none)            |
+| 14  | glowWavelength   | `float` | 0.0     | Interference wavelength (0 = pure glow, >0 = ripples) |
+| 15  | speedColor       | `int`   | 0       | Colour from velocity heatmap: 0/1                     |
+| 16  | springStrength   | `float` | 0.0     | Linear spring force strength (charge-dependent)       |
+| 17  | springRange      | `float` | 5.0     | Spring force cutoff distance (pixels)                 |
+| 18  | springEnabled    | `int`   | 0       | Enable spring force: 0/1                              |
+| 19  | coulombStrength  | `float` | 0.0     | Coulomb 1/r² force strength (charge-dependent)        |
+| 20  | coulombRange     | `float` | 10.0    | Coulomb force cutoff distance (pixels)                |
+| 21  | coulombEnabled   | `int`   | 0       | Enable Coulomb force: 0/1                             |
+| 22  | scaffoldStrength | `float` | 0.0     | Spring pull toward scaffold origin positions          |
+| 23  | scaffoldRange    | `float` | 10.0    | Scaffold force max effective range (pixels)           |
+| 24  | scaffoldEnabled  | `int`   | 0       | Enable scaffold attraction: 0/1                       |
+| 25  | collisionEnabled | `int`   | 1       | Enable hard-sphere collision: 0/1                     |
 
 #### Force model summary
 
-| Force     | Law              | Scope            | Depends on charge? |
-| --------- | ---------------- | ---------------- | ------------------ |
-| Collision | Hard-sphere      | Inter-particle   | No                 |
-| Attract   | Linear (fades)   | Inter-particle   | No                 |
-| Spring    | Linear           | Inter-particle   | Yes (q₁ × q₂)     |
-| Coulomb   | Inverse-square   | Inter-particle   | Yes (q₁ × q₂)     |
-| Scaffold  | Linear spring    | Particle→origin  | No                 |
+| Force     | Law            | Scope           | Depends on charge? |
+| --------- | -------------- | --------------- | ------------------ |
+| Collision | Hard-sphere    | Inter-particle  | No                 |
+| Attract   | Linear (fades) | Inter-particle  | No                 |
+| Spring    | Linear         | Inter-particle  | Yes (q₁ × q₂)      |
+| Coulomb   | Inverse-square | Inter-particle  | Yes (q₁ × q₂)      |
+| Scaffold  | Linear spring  | Particle→origin | No                 |
 
 **Serial examples:**
 
@@ -614,13 +614,13 @@ particle physics engine at runtime.
 
 ### `/display/<N>/particles/transform` — set full view transform
 
-| Parameter | Type    | Description               |
-| --------- | ------- | ------------------------- |
-| arg 0     | `float` | Rotation angle (degrees)  |
-| arg 1     | `float` | Scale X                   |
-| arg 2     | `float` | Scale Y                   |
-| arg 3     | `float` | Translate X (pixels)      |
-| arg 4     | `float` | Translate Y (pixels)      |
+| Parameter | Type    | Description              |
+| --------- | ------- | ------------------------ |
+| arg 0     | `float` | Rotation angle (degrees) |
+| arg 1     | `float` | Scale X                  |
+| arg 2     | `float` | Scale Y                  |
+| arg 3     | `float` | Translate X (pixels)     |
+| arg 4     | `float` | Translate Y (pixels)     |
 
 Render-time only — physics coordinates are not affected.
 Transform is applied as scale → rotate → translate around display centre.
@@ -635,9 +635,9 @@ Transform is applied as scale → rotate → translate around display centre.
 
 ### `/display/<N>/particles/rotate` — rotation only
 
-| Parameter | Type    | Description              |
-| --------- | ------- | ------------------------ |
-| arg 0     | `float` | Angle in degrees         |
+| Parameter | Type    | Description      |
+| --------- | ------- | ---------------- |
+| arg 0     | `float` | Angle in degrees |
 
 **Global form:** `/particles/rotate 30.0` — applies to all displays.
 
@@ -651,10 +651,10 @@ Transform is applied as scale → rotate → translate around display centre.
 
 ### `/display/<N>/particles/scale` — scale only
 
-| Parameter | Type    | Description               |
-| --------- | ------- | ------------------------- |
+| Parameter | Type    | Description              |
+| --------- | ------- | ------------------------ |
 | arg 0     | `float` | Scale X (and Y if 1 arg) |
-| arg 1     | `float` | Scale Y (optional)        |
+| arg 1     | `float` | Scale Y (optional)       |
 
 If only one argument is given, it applies to both axes.
 
@@ -670,10 +670,10 @@ If only one argument is given, it applies to both axes.
 
 ### `/display/<N>/particles/translate` — translate only
 
-| Parameter | Type    | Description          |
-| --------- | ------- | -------------------- |
-| arg 0     | `float` | X offset (pixels)    |
-| arg 1     | `float` | Y offset (pixels)    |
+| Parameter | Type    | Description       |
+| --------- | ------- | ----------------- |
+| arg 0     | `float` | X offset (pixels) |
+| arg 1     | `float` | Y offset (pixels) |
 
 **Global form:** `/particles/translate 5.0 0.0` — all displays.
 
@@ -701,9 +701,9 @@ No arguments. Resets rotation, scale, and translation to defaults.
 
 ### `/display/<N>/text/push` — push text to stack
 
-| Parameter | Type     | Description      |
-| --------- | -------- | ---------------- |
-| arg 0     | `string` | Text to push     |
+| Parameter | Type     | Description  |
+| --------- | -------- | ------------ |
+| arg 0     | `string` | Text to push |
 
 Appends text to the display's text stack (used by RENDER_TEXT particle mode
 and scroll continuous mode).
@@ -728,10 +728,10 @@ No arguments. Removes the last entry from the text stack.
 
 ### `/display/<N>/text/set` — set stack entry at index
 
-| Parameter | Type     | Description          |
-| --------- | -------- | -------------------- |
-| arg 0     | `int`    | Stack index (0-based)|
-| arg 1     | `string` | Text to set          |
+| Parameter | Type     | Description           |
+| --------- | -------- | --------------------- |
+| arg 0     | `int`    | Stack index (0-based) |
+| arg 1     | `string` | Text to set           |
 
 **Global form:** `/text/set 0 "NEW"` — applies to all displays.
 
@@ -783,6 +783,158 @@ their compiled defaults.
 
 ---
 
+### `/script/begin` — start a staged runtime script upload
+
+No arguments. Clears the staged upload buffer and starts a new
+runtime `.game` script upload session.
+
+---
+
+### `/script/append` — append one `.game` source line
+
+| Parameter | Type     | Description            |
+| --------- | -------- | ---------------------- |
+| arg 0     | `string` | One source line to add |
+
+Use this repeatedly to send a `.game` script line by line.
+The firmware appends a newline after each call.
+
+**Serial:**
+
+```
+/script/append "step intro"
+/script/append "wait 1000"
+```
+
+---
+
+### `/script/commit` — parse and install staged script
+
+No arguments. Parses the staged `.game` text, installs it as a
+runtime animation script, and makes it available through the existing
+`/animation N` and `/display/<N>/animation N` commands.
+
+---
+
+### `/script/cancel` — discard staged script text
+
+No arguments. Clears the current staged upload buffer.
+
+---
+
+### `/script/save` — save staged script text to flash
+
+| Parameter | Type     | Description                   |
+| --------- | -------- | ----------------------------- |
+| arg 0     | `string` | File name or path for `.game` |
+
+Stores the staged script source in SPIFFS. If the name has no leading
+slash, it is stored under `/games/` and `.game` is appended if missing.
+
+---
+
+### `/script/load` — load and install a stored script
+
+| Parameter | Type     | Description                   |
+| --------- | -------- | ----------------------------- |
+| arg 0     | `string` | File name or path for `.game` |
+
+Reads a stored `.game` file from SPIFFS, parses it, and installs it as
+runtime animation script data.
+
+---
+
+### `/script/bank/reseed` — restore a built-in preset into its bank slot
+
+| Parameter | Type  | Description               |
+| --------- | ----- | ------------------------- |
+| arg 0     | `int` | Bank slot number (`1..5`) |
+
+Overwrites a mutable bank slot from its matching built-in preset source,
+without requiring a full flash erase. This is intended for built-in slots
+such as the water preset in slot 4.
+
+**Serial:**
+
+```
+/script/bank/reseed 4
+```
+
+---
+
+### `/script/builtin/list` — list built-in preset templates
+
+No arguments. Prints the compiled-in preset templates as:
+`BUILTIN_BANK <builtinId> <defaultSlot> <name>`.
+
+**Serial:**
+
+```
+/script/builtin/list
+```
+
+---
+
+### `/script/builtin/load` — copy a built-in preset into a bank slot
+
+| Parameter | Type  | Description                        |
+| --------- | ----- | ---------------------------------- |
+| arg 0     | `int` | Built-in preset id                 |
+| arg 1     | `int` | Optional target bank slot (`1..5`) |
+
+Copies a compiled-in preset template into a mutable bank slot and installs it
+immediately. If the second argument is omitted, the preset is copied into its
+default slot.
+
+**Serial:**
+
+```
+/script/builtin/load 1
+/script/builtin/load 1 2
+```
+
+---
+
+### `/script/delete` — delete a stored script file
+
+| Parameter | Type     | Description                   |
+| --------- | -------- | ----------------------------- |
+| arg 0     | `string` | File name or path for `.game` |
+
+Deletes a stored `.game` file from SPIFFS.
+
+---
+
+### `/script/files` — list stored script files
+
+No arguments. Prints stored `.game` files from SPIFFS to serial.
+
+---
+
+### `/script/list` — list loaded runtime scripts
+
+No arguments. Prints runtime-installed scripts to serial as
+`RUNTIME_SCRIPT <id> <name> <stepCount>`.
+
+---
+
+### `/script/unload` — unload a runtime script by id
+
+| Parameter | Type  | Description       |
+| --------- | ----- | ----------------- |
+| arg 0     | `int` | Runtime script id |
+
+Removes one runtime-installed script from the in-memory registry.
+
+---
+
+### `/script/status` — show runtime script status
+
+No arguments. Prints whether SPIFFS storage is available, the number of
+staged upload bytes, and the number of runtime-installed scripts.
+
+---
+
 No arguments. Turns off all LEDs on all six displays.
 
 **OSC (Python):**
@@ -828,7 +980,7 @@ build_flags = -DSERIAL_CMD_ENABLED=0
 - **Unquoted numeric tokens** are parsed as integers: `42`, `255`.
 - **Unquoted non-numeric tokens** are treated as string arguments.
 - Lines starting with `#` are ignored (comments).
-- Maximum line length: 127 characters.
+- Maximum line length: 255 characters.
 
 ### Quick test from PlatformIO monitor
 
@@ -939,23 +1091,31 @@ Declared in `src/DisplayManager.h`, implemented in `src/DisplayManager.cpp`.
 All defines live in `src/config.h` and can be overridden with
 `-D` build flags in `platformio.ini`.
 
-| Define               | Default                | Description                         |
-| -------------------- | ---------------------- | ----------------------------------- |
-| `USE_WIFI`           | (fallback)             | Use WiFi for network                |
-| `USE_ETHERNET_W5500` | —                      | Use W5500 Ethernet instead of WiFi  |
-| `SERIAL_CMD_ENABLED` | `1`                    | Enable serial text command input    |
-| `NEOPIXEL_PIN`       | `2`                    | GPIO for NeoPixel data line         |
-| `NUM_DISPLAYS`       | `6`                    | Number of 32×8 tiles                |
-| `MATRIX_TILE_WIDTH`  | `32`                   | Pixels per tile (width)             |
-| `MATRIX_TILE_HEIGHT` | `8`                    | Pixels per tile (height)            |
-| `DEFAULT_BRIGHTNESS` | `20`                   | Start-up brightness (0-255)         |
-| `OSC_PORT`           | `9000`                 | UDP port for OSC messages           |
-| `SCROLL_STEP_MS`     | `25`                   | Milliseconds per scroll pixel step  |
-| `SCROLL_QUEUE_SIZE`  | `10`                   | Max queued scroll items per display |
-| `MATRIX_LAYOUT`      | see config.h           | NeoMatrix wiring flags              |
-| `LED_TYPE`           | `NEO_GRB + NEO_KHZ800` | NeoPixel colour order + speed       |
-| `ETH_CS_PIN`         | `6`                    | SPI chip-select for W5500           |
-| `ETH_RST_PIN`        | `7`                    | Reset pin for W5500                 |
+| Define                       | Default                           | Description                                |
+| ---------------------------- | --------------------------------- | ------------------------------------------ |
+| `SCOREBOARD_NETWORK_BACKEND` | `SCOREBOARD_NETWORK_BACKEND_WIFI` | Network transport backend                  |
+| `SCOREBOARD_WIFI_ENABLED`    | `1`                               | Enable or disable WiFi startup entirely    |
+| `SCOREBOARD_WIFI_MODE`       | `SCOREBOARD_WIFI_MODE_AP`         | WiFi startup mode: off / station / AP      |
+| `SCOREBOARD_HAS_M5UNIFIED`   | `0`                               | Enable M5Unified-specific hardware support |
+| `SCOREBOARD_RS485_ENABLED`   | `0`                               | Enable RS485 text-command interface        |
+| `SERIAL_CMD_ENABLED`         | `1`                               | Enable serial text command input           |
+| `NEOPIXEL_PIN`               | `2`                               | GPIO for NeoPixel data line                |
+| `NUM_DISPLAYS`               | `6`                               | Number of 32×8 tiles                       |
+| `MATRIX_TILE_WIDTH`          | `32`                              | Pixels per tile (width)                    |
+| `MATRIX_TILE_HEIGHT`         | `8`                               | Pixels per tile (height)                   |
+| `DEFAULT_BRIGHTNESS`         | `10`                              | Start-up brightness (0-255)                |
+| `OSC_PORT`                   | `9000`                            | UDP port for OSC messages                  |
+| `SCROLL_STEP_MS`             | `50`                              | Milliseconds per scroll pixel step         |
+| `WIFI_CONNECT_TIMEOUT_MS`    | `15000`                           | Station-mode WiFi connection timeout       |
+| `WIFI_AP_SSID`               | `"Scoreboard"`                    | Access-point SSID                          |
+| `WIFI_AP_PASS`               | `"12345678"`                      | Access-point password                      |
+| `MATRIX_LAYOUT`              | see config.h                      | NeoMatrix wiring flags                     |
+| `LED_TYPE`                   | `NEO_GRB + NEO_KHZ800`            | NeoPixel colour order + speed              |
+| `ETH_CS_PIN`                 | `6`                               | SPI chip-select for W5500                  |
+| `ETH_RST_PIN`                | `7`                               | Reset pin for W5500                        |
+| `RS485_RX_PIN`               | `5`                               | RS485 RX pin                               |
+| `RS485_TX_PIN`               | `6`                               | RS485 TX pin                               |
+| `RS485_BAUD`                 | `115200`                          | RS485 baud rate                            |
 
 ---
 

@@ -2,11 +2,11 @@
 #include <cstdio>
 #include <cstring>
 
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
   #include <M5Unified.h>
 #endif
 
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI && (SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_STATION)
   #include "credentials.h"        // defines WIFI_SSID, WIFI_PASSWORD
 #endif
 
@@ -14,10 +14,108 @@
 OSCHandler::OSCHandler(DisplayManager& display)
     : _display(display) {}
 
+String OSCHandler::bankSlotName(uint8_t slot) const {
+    return _runtimeScripts.bankSlotName(slot);
+}
+
+const char* OSCHandler::configuredWiFiModeName() const {
+#if SCOREBOARD_HAS_WIFI
+#if SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_AP
+    return "ap";
+#elif SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_STATION
+    return "station";
+#else
+    return "off";
+#endif
+#else
+    return "off";
+#endif
+}
+
+bool OSCHandler::accessPointActive() const {
+#if SCOREBOARD_HAS_WIFI
+    wifi_mode_t currentMode = WiFi.getMode();
+    return (currentMode & WIFI_AP) != 0;
+#else
+    return false;
+#endif
+}
+
+uint8_t OSCHandler::connectedClientCount() const {
+#if SCOREBOARD_HAS_WIFI
+    return accessPointActive() ? (uint8_t)WiFi.softAPgetStationNum() : 0;
+#else
+    return 0;
+#endif
+}
+
+void OSCHandler::printWiFiState(Print& out) const {
+    IPAddress ip(0, 0, 0, 0);
+#if SCOREBOARD_HAS_WIFI
+    if (SCOREBOARD_WIFI_ENABLED) {
+        ip = accessPointActive() ? WiFi.softAPIP() : WiFi.localIP();
+    }
+#endif
+    out.printf("WIFI_STATE enabled=%d mode=%s active=%d ip=%s clients=%u\n",
+               SCOREBOARD_WIFI_ENABLED ? 1 : 0,
+               configuredWiFiModeName(),
+               accessPointActive() ? 1 : 0,
+               ip.toString().c_str(),
+               connectedClientCount());
+}
+
+void OSCHandler::printDisplayState(uint8_t displayIndex, Print& out) const {
+    _display.printDisplayState(displayIndex, out);
+}
+
+bool OSCHandler::_startUdpListener() {
+    _udp.stop();
+    _udp.begin(OSC_PORT);
+    Serial.printf("OSC listening on UDP port %d\n", OSC_PORT);
+    return true;
+}
+
+#if SCOREBOARD_HAS_WIFI
+bool OSCHandler::startAccessPoint() {
+    if (!SCOREBOARD_WIFI_ENABLED || SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_OFF) {
+        Serial.println("WiFi disabled in config");
+        return false;
+    }
+
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+    WiFi.mode(WIFI_AP);
+    delay(100);
+
+    if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS)) {
+        Serial.println("Failed to start WiFi AP");
+        return false;
+    }
+
+    delay(100);
+    Serial.printf("WiFi AP started — SSID: %s  IP: %s\n",
+                  WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
+    return _startUdpListener();
+}
+
+void OSCHandler::stopWiFi() {
+    _udp.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_OFF);
+}
+#endif
+
 // ── Network init + UDP listener ──────────────────────────────
 bool OSCHandler::begin() {
 
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI
+    if (!SCOREBOARD_WIFI_ENABLED || SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_OFF) {
+        Serial.println("WiFi disabled in config");
+        return false;
+    }
+#if SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_AP
+    return startAccessPoint();
+#elif SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_STATION
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("Connecting to WiFi");
@@ -26,14 +124,18 @@ bool OSCHandler::begin() {
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print('.');
-        if (millis() - t0 > 15000) {
+        if (millis() - t0 > WIFI_CONNECT_TIMEOUT_MS) {
             Serial.println("\nWiFi connection timed out");
             return false;
         }
     }
     Serial.printf("\nConnected — IP %s\n", WiFi.localIP().toString().c_str());
+#else
+    Serial.println("Unsupported WiFi mode in config");
+    return false;
+#endif
 
-#elif defined(USE_ETHERNET_W5500)
+#elif SCOREBOARD_HAS_ETHERNET
     // Reset W5500
     pinMode(ETH_RST_PIN, OUTPUT);
     digitalWrite(ETH_RST_PIN, LOW);
@@ -50,11 +152,11 @@ bool OSCHandler::begin() {
         return false;
     }
     Serial.printf("\nEthernet IP %s\n", Ethernet.localIP().toString().c_str());
+#else
+    return false;
 #endif
 
-    _udp.begin(OSC_PORT);
-    Serial.printf("OSC listening on UDP port %d\n", OSC_PORT);
-    return true;
+    return _startUdpListener();
 }
 
 // ── Poll for incoming packets ────────────────────────────────
@@ -78,11 +180,31 @@ void OSCHandler::executeCommand(const char* line) {
     _handleSerialLine(line);
 }
 
+void OSCHandler::beginRuntimeScripts() {
+    _runtimeScripts.begin();
+    String startup = _runtimeScripts.startupScriptPath();
+    if (startup.length() == 0) {
+        return;
+    }
+
+    String err;
+    if (_runtimeScripts.loadStartupScript(&err)) {
+        Serial.printf("SCRIPT_STARTUP_LOADED %u %s\n",
+            _runtimeScripts.lastInstalledId(),
+            _runtimeScripts.lastInstalledName().c_str());
+    } else {
+        Serial.printf("SCRIPT_ERROR startup %s\n", err.c_str());
+    }
+}
+
 // ── Resolve our IP ───────────────────────────────────────────
-IPAddress OSCHandler::localIP() {
-#ifdef USE_WIFI
+IPAddress OSCHandler::localIP() const {
+#if SCOREBOARD_HAS_WIFI
+    if (accessPointActive()) {
+        return WiFi.softAPIP();
+    }
     return WiFi.localIP();
-#elif defined(USE_ETHERNET_W5500)
+#elif SCOREBOARD_HAS_ETHERNET
     return Ethernet.localIP();
 #else
     return IPAddress(0, 0, 0, 0);
@@ -131,6 +253,9 @@ IPAddress OSCHandler::localIP() {
 //    /display/<N>/particles/scale    — scale only (float sx [sy])
 //    /display/<N>/particles/translate — translate only (float tx ty)
 //    /display/<N>/particles/resettransform — reset view to identity
+//    /display/<N>/animation N — select animation N for this display (0=off)
+//    /display/<N>/animation/start — start selected animation immediately
+//    /display/<N>/animation/stop — stop current animation on this display
 //    /brightness               — global brightness (int arg 0-255)
 //    /mode                     — set mode for ALL displays (int 0-2)
 //    /text/enable              — text layer on all displays: 0=off, 1=on
@@ -156,6 +281,24 @@ IPAddress OSCHandler::localIP() {
 //    /particles/translate      — translate (all, float tx ty)
 //    /particles/resettransform — reset all view transforms
 //    /defaults                 — reset all params to compiled defaults
+//    /saveparams [bank]        — save params to NVS bank (default=startup)
+//    /loadparams [bank]        — load params from NVS bank (default=startup)
+//    /startupbank [bank]       — get/set startup bank [1..5]
+//    /save                     — alias of /saveparams
+//    /load                     — alias of /loadparams
+//    /animation N              — select animation N for all displays (0=off)
+//    /animation/stop           — stop running animations on all displays
+//    /script/begin             — start staged runtime script upload
+//    /script/append "line"     — append one source line to staged script text
+//    /script/commit            — parse/install staged runtime script
+//    /script/cancel            — discard staged script text
+//    /script/save "file"       — save staged script text to SPIFFS
+//    /script/load "file"       — load + install script text from SPIFFS
+//    /script/delete "file"     — delete stored script from SPIFFS
+//    /script/files             — list stored .game files in SPIFFS
+//    /script/list              — list currently loaded runtime scripts
+//    /script/unload N          — remove one runtime script by id
+//    /script/status            — show staged upload + storage status
 //    /clearqueue               — discard scroll queues on all displays
 //    /clearall  or  /clear     — clear every display (also flushes queues)
 //    /status                   — replies "ANIMATING 0" or "ANIMATING 1"
@@ -328,11 +471,12 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (msg.size() >= 24 && msg.isFloat(23)) cfg.scaffoldRange    = msg.getFloat(23);
                 if (msg.size() >= 25 && msg.isInt(24))   cfg.scaffoldEnabled  = (msg.getInt(24) != 0);
                 if (msg.size() >= 26 && msg.isInt(25))   cfg.collisionEnabled = (msg.getInt(25) != 0);
+                if (msg.size() >= 27 && msg.isInt(26))   cfg.attractEnabled   = (msg.getInt(26) != 0);
                 _display.setParticleConfig(idx, cfg);
-                Serial.printf("D%d particles: n=%d grav=%.1f(%s) el=%.2f att=%.2f@%.1f temp=%.2f spr=%.2f@%.1f(%s) coul=%.2f@%.1f(%s) scf=%.2f@%.1f(%s) col=%s\n",
+                Serial.printf("D%d particles: n=%d grav=%.1f(%s) att=%s %.2f@%.1f temp=%.2f spr=%.2f@%.1f(%s) coul=%.2f@%.1f(%s) scf=%.2f@%.1f(%s) col=%s\n",
                               displayNum, cfg.count,
                               cfg.gravityScale, cfg.gravityEnabled ? "on" : "off",
-                              cfg.elasticity, cfg.attractStrength, cfg.attractRange,
+                              cfg.attractEnabled ? "on" : "off", cfg.attractStrength, cfg.attractRange,
                               cfg.temperature,
                               cfg.springStrength, cfg.springRange, cfg.springEnabled ? "on" : "off",
                               cfg.coulombStrength, cfg.coulombRange, cfg.coulombEnabled ? "on" : "off",
@@ -368,6 +512,15 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             VirtualDisplay* vd = _display.getDisplay(idx);
             if (vd) { vd->textClear(); Serial.printf("D%d text stack cleared\n", displayNum); }
         }
+        else if (strcmp(subCmd, "text/stack") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd && msg.isString(0)) {
+                char text[512];
+                msg.getString(0, text, sizeof(text));
+                vd->replaceTextStack(text);
+                Serial.printf("D%d text stack replaced (%d entries)\n", displayNum, vd->textCount());
+            }
+        }
         else if (strcmp(subCmd, "text/list") == 0) {
             VirtualDisplay* vd = _display.getDisplay(idx);
             if (vd) {
@@ -391,6 +544,24 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) {
                 vd->screenToParticles();
                 Serial.printf("D%d screen→particles\n", displayNum);
+            }
+        }
+        else if (strcmp(subCmd, "particles/add") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                uint8_t amount = 1;
+                if (msg.isInt(0) && msg.getInt(0) > 0) {
+                    amount = (uint8_t)msg.getInt(0);
+                }
+                uint16_t count = vd->addRandomParticle(amount);
+                Serial.printf("D%d particles add → %u\n", displayNum, count);
+            }
+        }
+        else if (strcmp(subCmd, "particles/clear") == 0) {
+            VirtualDisplay* vd = _display.getDisplay(idx);
+            if (vd) {
+                vd->clearParticles();
+                Serial.printf("D%d particles cleared\n", displayNum);
             }
         }
         // ── /display/<N>/particles/pause — pause/resume physics ─
@@ -475,12 +646,41 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 Serial.printf("D%d transform reset\n", displayNum);
             }
         }
+        // ── /display/<N>/animation N — select animation script ─
+        else if (strcmp(subCmd, "animation") == 0) {
+            if (msg.isInt(0)) {
+                int aid = msg.getInt(0);
+                if (aid < 0) aid = 0;
+                _display.setAnimation(idx, (uint8_t)aid);
+                Serial.printf("D%d animation slot selected -> %d (%s)\n", displayNum, aid,
+                              _display.animationName(idx));
+            }
+        }
+        // ── /display/<N>/animation/start — start selected animation now ─
+        else if (strcmp(subCmd, "animation/start") == 0) {
+            _display.startAnimation(idx);
+            Serial.printf("D%d animation started\n", displayNum);
+        }
+        // ── /display/<N>/animation/stop — stop animation runtime ─
+        else if (strcmp(subCmd, "animation/stop") == 0) {
+            _display.stopAnimation(idx);
+            Serial.printf("D%d animation stopped\n", displayNum);
+        }
+        // ── /display/<N>/state — dump current runtime params as JSON ─
+        else if (strcmp(subCmd, "state") == 0) {
+            _display.notifyDisplayState(idx);
+        }
+
+        if (strcmp(subCmd, "state") != 0 && strcmp(subCmd, "text/list") != 0) {
+            _display.schedulePersist();
+        }
     }
     // ── /brightness ──────────────────────────────────────────
     else if (strcmp(address, "/brightness") == 0) {
         if (msg.isInt(0)) {
             _display.setBrightness(msg.getInt(0));
             Serial.printf("Brightness → %ld\n", (long)msg.getInt(0));
+            _display.schedulePersist();
         }
     }
     // ── /mode — set display mode for all displays ────────────
@@ -489,6 +689,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (_parseDisplayModeArg(msg, 0, &mode)) {
             _display.setModeAll(mode);
             Serial.printf("All mode → %d\n", (int)mode);
+            _display.schedulePersist();
         }
     }
     // ── /particles/enable — toggle particles overlay (all) ──
@@ -496,6 +697,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setParticlesEnabled(msg.getInt(0) != 0);
             Serial.printf("All particles → %s\n", msg.getInt(0) ? "ON" : "OFF");
+            _display.schedulePersist();
         }
     }
     // ── /particles/brightness — particle layer brightness (all) ─
@@ -503,6 +705,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setParticleBrightness(msg.getInt(0));
             Serial.printf("All particle brightness → %ld\n", (long)msg.getInt(0));
+            _display.schedulePersist();
         }
     }
     // ── /particles/color — particle colour (all, R G B) ─────
@@ -511,6 +714,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             _display.setParticleColor(msg.getInt(0), msg.getInt(1), msg.getInt(2));
             Serial.printf("All particle color (%ld,%ld,%ld)\n",
                           (long)msg.getInt(0), (long)msg.getInt(1), (long)msg.getInt(2));
+            _display.schedulePersist();
         }
     }
     // ── /text/enable — toggle text layer (all) ──────────────
@@ -518,6 +722,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setTextEnabled(msg.getInt(0) != 0);
             Serial.printf("All text → %s\n", msg.getInt(0) ? "ON" : "OFF");
+            _display.schedulePersist();
         }
     }
     // ── /text/brightness — text layer brightness (all) ──────
@@ -525,6 +730,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setTextBrightness(msg.getInt(0));
             Serial.printf("All text brightness → %ld\n", (long)msg.getInt(0));
+            _display.schedulePersist();
         }
     }
     // ── /scroll — set scroll mode for all displays ──────────
@@ -533,6 +739,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             int mode = msg.getInt(0);
             _display.setScrollModeAll(mode);
             Serial.printf("All scroll → %d\n", mode);
+            _display.schedulePersist();
         }
     }
     // ── /scrollspeed — scroll animation speed (ms per pixel) ─
@@ -540,6 +747,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setScrollSpeed(msg.getInt(0));
             Serial.printf("Scroll speed → %ld ms\n", (long)msg.getInt(0));
+            _display.schedulePersist();
         }
     }
     // ── /scrollcontinuous — auto-cycle textStack in scroll mode ─
@@ -547,6 +755,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         if (msg.isInt(0)) {
             _display.setScrollContinuous(msg.getInt(0) != 0);
             Serial.printf("Scroll continuous → %s\n", msg.getInt(0) ? "ON" : "OFF");
+            _display.schedulePersist();
         }
     }
     // ── /display/<N>/text/push "STRING" — push to text stack ─
@@ -563,6 +772,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (vd) vd->textPush(text);
             }
             Serial.printf("Text push → \"%s\" (all displays)\n", text);
+            _display.schedulePersist();
         }
     }
     else if (strcmp(address, "/text/pop") == 0) {
@@ -571,6 +781,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->textPop();
         }
         Serial.println("Text pop (all displays)");
+        _display.schedulePersist();
     }
     else if (strcmp(address, "/text/set") == 0) {
         if (msg.size() >= 2 && msg.isInt(0) && msg.isString(1)) {
@@ -582,6 +793,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (vd) vd->textSet(idx, text);
             }
             Serial.printf("Text set [%d] → \"%s\" (all displays)\n", idx, text);
+            _display.schedulePersist();
         }
     }
     else if (strcmp(address, "/text/clear") == 0) {
@@ -590,6 +802,19 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->textClear();
         }
         Serial.println("Text stack cleared (all displays)");
+        _display.schedulePersist();
+    }
+    else if (strcmp(address, "/text/stack") == 0) {
+        if (msg.isString(0)) {
+            char text[512];
+            msg.getString(0, text, sizeof(text));
+            for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+                VirtualDisplay* vd = _display.getDisplay(i);
+                if (vd) vd->replaceTextStack(text);
+            }
+            Serial.println("Text stack replaced (all displays)");
+            _display.schedulePersist();
+        }
     }
     else if (strcmp(address, "/text/list") == 0) {
         for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
@@ -608,6 +833,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->textToParticles();
         }
         Serial.println("All text→particles");
+        _display.schedulePersist();
     }
     // ── /screen2particles — capture screen to particles (all) ─
     else if (strcmp(address, "/screen2particles") == 0) {
@@ -616,6 +842,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->screenToParticles();
         }
         Serial.println("All screen→particles");
+        _display.schedulePersist();
     }
     // ── /particles/pause — pause/resume physics (all) ────────
     else if (strcmp(address, "/particles/pause") == 0) {
@@ -625,6 +852,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (vd) vd->setPhysicsPaused(msg.getInt(0) != 0);
             }
             Serial.printf("All physics %s\n", msg.getInt(0) ? "PAUSED" : "RUNNING");
+            _display.schedulePersist();
         }
     }
     // ── /particles/restore — restore scaffold positions (all) ─
@@ -634,6 +862,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) { vd->restoreScaffoldPositions(); vd->setPhysicsPaused(true); }
         }
         Serial.println("All scaffold positions restored");
+        _display.schedulePersist();
     }
     // ── /particles/restorecolors — restore scaffold colors (all) ─
     else if (strcmp(address, "/particles/restorecolors") == 0) {
@@ -642,6 +871,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->restoreScaffoldColors();
         }
         Serial.println("All scaffold colours restored");
+        _display.schedulePersist();
     }
     // ── /particles/rotate — rotate all (degrees) ─────────────
     else if (strcmp(address, "/particles/rotate") == 0) {
@@ -651,6 +881,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (vd) vd->setParticleRotation(msg.getFloat(0));
             }
             Serial.printf("All rotate %.1f°\n", msg.getFloat(0));
+            _display.schedulePersist();
         }
     }
     // ── /particles/scale — scale all ─────────────────────────
@@ -663,6 +894,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (vd) vd->setParticleScale(sx, sy);
             }
             Serial.printf("All scale (%.2f, %.2f)\n", sx, sy);
+            _display.schedulePersist();
         }
     }
     // ── /particles/translate — translate all ──────────────────
@@ -674,6 +906,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->setParticleTranslation(tx, ty);
         }
         Serial.printf("All translate (%.1f, %.1f)\n", tx, ty);
+        _display.schedulePersist();
     }
     // ── /particles/resettransform — reset all transforms ─────
     else if (strcmp(address, "/particles/resettransform") == 0) {
@@ -682,6 +915,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
             if (vd) vd->resetParticleTransform();
         }
         Serial.println("All transforms reset");
+        _display.schedulePersist();
     }
     // ── /defaults — reset all params to compiled defaults ────
     else if (strcmp(address, "/defaults") == 0) {
@@ -696,34 +930,291 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         }
         _display.setBrightness(DEFAULT_BRIGHTNESS);
         Serial.println("All params reset to defaults");
+        _display.schedulePersist();
     }
     // ── /clearqueue — flush all scroll queues ────────────────
     else if (strcmp(address, "/clearqueue") == 0) {
         _display.clearQueueAll();
         Serial.println("All queues cleared");
+        _display.schedulePersist();
     }
     // ── /clearall  |  /clear ─────────────────────────────────
     else if (strcmp(address, "/clearall") == 0 ||
              strcmp(address, "/clear")    == 0) {
         _display.clearAll();
         Serial.println("All displays cleared");
+        _display.schedulePersist();
     }
     // ── /status — query animation state ──────────────────────
     else if (strcmp(address, "/status") == 0) {
         Serial.printf("ANIMATING %d\n", _display.isAnimating() ? 1 : 0);
+    }
+    else if (strcmp(address, "/wifi/state") == 0) {
+        printWiFiState(Serial);
     }
     // ── /rasterscan — light each LED in sequence ─────────────
     else if (strcmp(address, "/rasterscan") == 0) {
         uint16_t ms = (msg.size() >= 1 && msg.isInt(0)) ? msg.getInt(0) : 30;
         _display.showRasterScan(ms);
     }
-    // ── /saveparams — persist to ESP32 NVS ───────────────────
-    else if (strcmp(address, "/saveparams") == 0) {
-        _display.saveParams();
+    // ── /saveparams [/save] — persist to ESP32 NVS ───────────
+    else if (strcmp(address, "/saveparams") == 0 || strcmp(address, "/save") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int bank = msg.getInt(0);
+            if (bank < 1) bank = 1;
+            _display.saveParams((uint8_t)bank);
+        } else {
+            _display.saveParams();
+        }
     }
-    // ── /loadparams — restore from ESP32 NVS ─────────────────
-    else if (strcmp(address, "/loadparams") == 0) {
-        _display.loadParams();
+    // ── /loadparams [/load] — restore from ESP32 NVS ─────────
+    else if (strcmp(address, "/loadparams") == 0 || strcmp(address, "/load") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int bank = msg.getInt(0);
+            if (bank < 1) bank = 1;
+            _display.loadParams((uint8_t)bank);
+        } else {
+            _display.loadParams();
+        }
+        _display.schedulePersist();
+    }
+    // ── /startupbank [bank] — get/set startup NVS bank ───────
+    else if (strcmp(address, "/startupbank") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int bank = msg.getInt(0);
+            if (bank < 1) bank = 1;
+            _display.setStartupBank((uint8_t)bank);
+        }
+        Serial.printf("STARTUP_BANK %d\n", _display.startupBank());
+    }
+    // ── /animation N — select animation for all displays ─────
+    else if (strcmp(address, "/animation") == 0) {
+        if (msg.isInt(0)) {
+            int aid = msg.getInt(0);
+            if (aid < 0) aid = 0;
+            _display.setAnimationAll((uint8_t)aid);
+            Serial.printf("All animation slot selected -> %d\n", aid);
+            _display.schedulePersist();
+        }
+    }
+    // ── /animation/stop — stop running animations on all displays ─
+    else if (strcmp(address, "/animation/stop") == 0) {
+        _display.stopAnimationAll();
+        Serial.println("All animations stopped");
+        _display.schedulePersist();
+    }
+    // ── /script/* — runtime script upload + storage ──────────
+    else if (strcmp(address, "/script/begin") == 0) {
+        _runtimeScripts.beginUpload();
+        Serial.println("SCRIPT_UPLOAD BEGIN");
+    }
+    else if (strcmp(address, "/script/append") == 0) {
+        if (msg.isString(0)) {
+            char line[160];
+            msg.getString(0, line, sizeof(line));
+            String err;
+            if (_runtimeScripts.appendUploadLine(line, &err)) {
+                Serial.printf("SCRIPT_UPLOAD APPEND %u\n", (unsigned)_runtimeScripts.stagedBytes());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR append expects a string line");
+        }
+    }
+    else if (strcmp(address, "/script/commit") == 0) {
+        String err;
+        if (_runtimeScripts.commitUpload(&err)) {
+            Serial.printf("SCRIPT_LOADED %u %s\n",
+                _runtimeScripts.lastInstalledId(),
+                _runtimeScripts.lastInstalledName().c_str());
+        } else {
+            Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+        }
+    }
+    else if (strcmp(address, "/script/bank/commit") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int slot = msg.getInt(0);
+            String err;
+            if (_runtimeScripts.installBankSlotFromStaged((uint8_t)slot, &err)) {
+                Serial.printf("BANK_SLOT_LOADED %d %s\n", slot,
+                    _runtimeScripts.lastInstalledName().c_str());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR bank/commit expects slot number");
+        }
+    }
+    else if (strcmp(address, "/script/cancel") == 0) {
+        _runtimeScripts.cancelUpload();
+        Serial.println("SCRIPT_UPLOAD CANCEL");
+    }
+    else if (strcmp(address, "/script/save") == 0) {
+        if (msg.isString(0)) {
+            char path[96];
+            msg.getString(0, path, sizeof(path));
+            String err;
+            if (_runtimeScripts.saveStagedScript(path, &err)) {
+                Serial.printf("SCRIPT_SAVED %s\n", path);
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR save expects a file name");
+        }
+    }
+    else if (strcmp(address, "/script/load") == 0) {
+        if (msg.isString(0)) {
+            char path[96];
+            msg.getString(0, path, sizeof(path));
+            String err;
+            if (_runtimeScripts.loadScriptFile(path, &err)) {
+                Serial.printf("SCRIPT_LOADED %u %s\n",
+                    _runtimeScripts.lastInstalledId(),
+                    _runtimeScripts.lastInstalledName().c_str());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR load expects a file name");
+        }
+    }
+    else if (strcmp(address, "/script/bank/load") == 0) {
+        if (msg.size() >= 2 && msg.isInt(0) && msg.isString(1)) {
+            int slot = msg.getInt(0);
+            char path[96];
+            msg.getString(1, path, sizeof(path));
+            String err;
+            if (_runtimeScripts.installBankSlotFromFile((uint8_t)slot, path, &err)) {
+                Serial.printf("BANK_SLOT_LOADED %d %s\n", slot,
+                    _runtimeScripts.lastInstalledName().c_str());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR bank/load expects slot and file name");
+        }
+    }
+    else if (strcmp(address, "/script/bank/reseed") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int slot = msg.getInt(0);
+            String err;
+            if (_runtimeScripts.reseedBuiltinBankSlot((uint8_t)slot, &err)) {
+                Serial.printf("BANK_SLOT_LOADED %d %s\n", slot,
+                    _runtimeScripts.lastInstalledName().c_str());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR bank/reseed expects slot number");
+        }
+    }
+    else if (strcmp(address, "/script/builtin/load") == 0) {
+        if (msg.size() >= 1 && msg.isInt(0)) {
+            int builtinId = msg.getInt(0);
+            int slot = 0;
+            if (msg.size() >= 2) {
+                if (!msg.isInt(1)) {
+                    Serial.println("SCRIPT_ERROR builtin/load expects builtin id and optional slot number");
+                    return;
+                }
+                slot = msg.getInt(1);
+            }
+
+            String err;
+            if (_runtimeScripts.installBuiltinBankSlot((uint8_t)builtinId, (uint8_t)slot, &err)) {
+                Serial.printf("BANK_SLOT_LOADED %u %s\n",
+                    _runtimeScripts.lastInstalledId(),
+                    _runtimeScripts.lastInstalledName().c_str());
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR builtin/load expects builtin id and optional slot number");
+        }
+    }
+    else if (strcmp(address, "/script/delete") == 0) {
+        if (msg.isString(0)) {
+            char path[96];
+            msg.getString(0, path, sizeof(path));
+            String err;
+            if (_runtimeScripts.deleteScriptFile(path, &err)) {
+                Serial.printf("SCRIPT_DELETED %s\n", path);
+            } else {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR delete expects a file name");
+        }
+    }
+    else if (strcmp(address, "/script/startup") == 0) {
+        String err;
+        if (msg.size() >= 1 && msg.isString(0)) {
+            char path[96];
+            msg.getString(0, path, sizeof(path));
+            String value(path);
+            value.trim();
+            value.toLowerCase();
+            bool ok = false;
+            if (value == "" || value == "none" || value == "off" || value == "clear") {
+                ok = _runtimeScripts.clearStartupScriptFile(&err);
+            } else {
+                ok = _runtimeScripts.setStartupScriptFile(path, &err);
+            }
+            if (!ok) {
+                Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+                return;
+            }
+        }
+
+        String startup = _runtimeScripts.startupScriptPath();
+        if (startup.length() == 0) {
+            Serial.println("SCRIPT_STARTUP NONE");
+        } else {
+            Serial.printf("SCRIPT_STARTUP %s\n", startup.c_str());
+        }
+    }
+    else if (strcmp(address, "/script/files") == 0) {
+        _runtimeScripts.listScriptFiles(Serial);
+    }
+    else if (strcmp(address, "/script/bank/list") == 0) {
+        _runtimeScripts.listBankSlots(Serial);
+    }
+    else if (strcmp(address, "/script/builtin/list") == 0) {
+        _runtimeScripts.listBuiltinBankSlots(Serial);
+    }
+    else if (strcmp(address, "/script/list") == 0) {
+        _runtimeScripts.listRuntimeScripts(Serial);
+    }
+    else if (strcmp(address, "/script/unload") == 0) {
+        if (msg.isInt(0)) {
+            int id = msg.getInt(0);
+            if (id < 1) {
+                Serial.println("SCRIPT_ERROR unload expects id >= 1");
+            } else {
+                String err;
+                if (_runtimeScripts.unloadRuntimeScript((uint8_t)id, &err)) {
+                    Serial.printf("SCRIPT_UNLOADED %d\n", id);
+                } else {
+                    Serial.printf("SCRIPT_ERROR %s\n", err.c_str());
+                }
+            }
+        } else {
+            Serial.println("SCRIPT_ERROR unload expects an integer id");
+        }
+    }
+    else if (strcmp(address, "/script/status") == 0) {
+        String startup = _runtimeScripts.startupScriptPath();
+        Serial.printf("SCRIPT_STATUS storage=%d staged=%u runtime=%u\n",
+            _runtimeScripts.storageReady() ? 1 : 0,
+            (unsigned)_runtimeScripts.stagedBytes(),
+            runtimeAnimationScriptCount());
+        if (startup.length() == 0) {
+            Serial.println("SCRIPT_STARTUP NONE");
+        } else {
+            Serial.printf("SCRIPT_STARTUP %s\n", startup.c_str());
+        }
     }
     else {
         Serial.printf("Unknown OSC: %s\n", address);
@@ -776,7 +1267,7 @@ void OSCHandler::processSerial() {
 #endif  // SERIAL_CMD_ENABLED
 
 // ── RS485 command interface (same text protocol as USB Serial) ─
-#ifdef USE_RS485
+#if SCOREBOARD_RS485_ENABLED
 
 void OSCHandler::processRS485() {
     while (Serial2.available()) {
@@ -794,11 +1285,11 @@ void OSCHandler::processRS485() {
     }
 }
 
-#endif  // USE_RS485
+#endif  // SCOREBOARD_RS485_ENABLED
 
 // ── Shared text-line command parser (used by USB Serial, RS485 & Web) ──
 
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
 static void _lcdSerialDebug(const char* line) {
     // Show received command at the bottom of the LCD (non-destructive)
     int16_t h = M5.Display.height();
@@ -847,9 +1338,12 @@ void OSCHandler::_handleSerialLine(const char* line) {
         if (*p == '"') {
             // Quoted string argument
             p++;  // skip opening quote
-            char strArg[64];
+            char strArg[160];
             size_t si = 0;
             while (*p && *p != '"' && si < sizeof(strArg) - 1) {
+                if (*p == '\\' && p[1] != '\0') {
+                    p++;
+                }
                 strArg[si++] = *p++;
             }
             strArg[si] = '\0';
@@ -876,7 +1370,7 @@ void OSCHandler::_handleSerialLine(const char* line) {
 
             if (!parsed) {
                 // Unquoted string token (until next space)
-                char tok[64];
+                char tok[160];
                 size_t ti = 0;
                 while (*p && *p != ' ' && *p != '\t' && ti < sizeof(tok) - 1) {
                     tok[ti++] = *p++;
@@ -901,7 +1395,7 @@ void OSCHandler::_handleSerialLine(const char* line) {
     }
     Serial.println();
 
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
     _lcdSerialDebug(line);
 #endif
 

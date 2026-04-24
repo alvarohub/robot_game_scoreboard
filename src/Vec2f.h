@@ -9,7 +9,7 @@ struct Vec2f {
     float x = 0.0f;
     float y = 0.0f;
 
-    Vec2f() = default;
+    Vec2f() = default; // default is a constructor that initializes x and y to 0.0f
     Vec2f(float x_, float y_) : x(x_), y(y_) {}
 
     // ── Arithmetic ───────────────────────────────────────────

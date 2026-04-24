@@ -13,23 +13,23 @@
 #include "DisplayManager.h"
 #include "OSCHandler.h"
 
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI
   #include "WebInterface.h"
 #endif
 
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
   #include <M5Unified.h>
 #endif
 
 DisplayManager displayManager;
 OSCHandler     osc(displayManager);
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI
 WebInterface   webUI(osc);
 #endif
 bool           networkUp = false;
 
 // ── Helper: show status on the AtomS3 built-in LCD ───────────
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
 static void lcdStatus(const char* line1, const char* line2 = nullptr,
                       uint32_t color = TFT_WHITE) {
     M5.Display.fillScreen(TFT_BLACK);
@@ -88,33 +88,59 @@ static void lcdBottomLine(const char* text) {
 #endif
 
 // ── AP toggle ────────────────────────────────────────────────
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI
 static void toggleAP() {
+    if (!SCOREBOARD_WIFI_ENABLED) {
+        return;
+    }
+
     if (webUI.isRunning()) {
-        webUI.stopAP();
-#ifdef USE_M5UNIFIED
-        lcdShowIdle();
-#endif
-        // Re-establish STA WiFi for OSC
+        webUI.stopServer();
+        osc.stopWiFi();
+        networkUp = false;
+
+#if SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_STATION
         if (osc.begin()) {
             networkUp = true;
             Serial.printf("WiFi STA reconnected — IP %s\n", osc.localIP().toString().c_str());
-        }
-    } else {
-        // Disconnect STA WiFi before starting AP
-        WiFi.disconnect(true);
-        networkUp = false;
-        IPAddress ip = webUI.startAP();
-#ifdef USE_M5UNIFIED
-        lcdShowAP(webUI.ssid(), ip.toString().c_str());
+#if SCOREBOARD_HAS_M5UNIFIED
+            lcdStatus("Ready", osc.localIP().toString().c_str(), TFT_GREEN);
+            delay(1000);
+            lcdShowIdle();
 #endif
+        }
+#else
+#if SCOREBOARD_HAS_M5UNIFIED
+        lcdShowIdle();
+#endif
+        Serial.println("WiFi AP disabled");
+#endif
+    } else {
+        if (osc.startAccessPoint()) {
+            networkUp = true;
+            webUI.startServer();
+            IPAddress ip = osc.localIP();
+#if SCOREBOARD_HAS_M5UNIFIED
+            lcdShowAP(webUI.ssid(), ip.toString().c_str());
+#endif
+            Serial.printf("WiFi AP active — SSID %s  IP %s\n",
+                          webUI.ssid(), ip.toString().c_str());
+        } else {
+            networkUp = false;
+#if SCOREBOARD_HAS_M5UNIFIED
+            lcdStatus("AP ERR", "serial only", TFT_RED);
+            delay(1000);
+            lcdShowIdle();
+#endif
+            Serial.println("Failed to enable WiFi AP");
+        }
     }
 }
 #endif
 
 // ── Setup ────────────────────────────────────────────────────
 void setup() {
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
     auto cfg = M5.config();
     cfg.serial_baudrate = 115200;
     M5.begin(cfg);
@@ -135,74 +161,107 @@ void setup() {
     Serial.printf("  Displays     : %d × %d×%d\n",
                   NUM_DISPLAYS, MATRIX_TILE_WIDTH, MATRIX_TILE_HEIGHT);
     Serial.printf("  OSC port     : %d\n", OSC_PORT);
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
     Serial.printf("  IMU          : %s\n", M5.Imu.isEnabled() ? "enabled" : "not detected");
 #endif
 
-#ifdef USE_RS485
+#if SCOREBOARD_RS485_ENABLED
     Serial2.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
     Serial.printf("  RS485        : RX=GPIO%d  TX=GPIO%d  %d baud\n",
                   RS485_RX_PIN, RS485_TX_PIN, RS485_BAUD);
 #endif
 
-    // Initialise LED matrices and run a quick self-test
-    displayManager.begin();
-    displayManager.showTestPattern();
-    displayManager.startDisplay();
-
     // ── Network ────────────────────────────────────────────────
 
-#if defined(USE_WIFI) || defined(USE_ETHERNET_W5500)
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_ETHERNET || (SCOREBOARD_HAS_WIFI && SCOREBOARD_WIFI_ENABLED)
+#if SCOREBOARD_HAS_WIFI && (SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_AP)
+#if SCOREBOARD_HAS_M5UNIFIED
+    lcdStatus("Starting", "access point...", TFT_YELLOW);
+#endif
+    if (osc.startAccessPoint()) {
+        networkUp = true;
+        webUI.startServer();
+        IPAddress ip = osc.localIP();
+        Serial.printf("Network up — AP %s @ %s\n", webUI.ssid(), ip.toString().c_str());
+#if SCOREBOARD_HAS_M5UNIFIED
+        lcdShowAP(webUI.ssid(), ip.toString().c_str());
+#endif
+    } else {
+        Serial.println("*** Access point failed — continuing serial-only ***");
+#if SCOREBOARD_HAS_M5UNIFIED
+        lcdStatus("NET ERR", "serial only", TFT_RED);
+#endif
+        delay(2000);
+    }
+#else
+#if SCOREBOARD_HAS_M5UNIFIED
     lcdStatus("Connecting", "network...", TFT_YELLOW);
 #endif
     if (osc.begin()) {
         networkUp = true;
         IPAddress ip = osc.localIP();
         Serial.printf("Network up — IP %s\n", ip.toString().c_str());
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
         lcdStatus("Ready", ip.toString().c_str(), TFT_GREEN);
 #endif
         delay(4000);
     } else {
         Serial.println("*** Network failed — continuing serial-only ***");
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
         lcdStatus("NET ERR", "serial only", TFT_RED);
 #endif
         delay(2000);
     }
 #endif
+#endif
+
+    // Initialise display and storage after the network stack has claimed
+    // the internal RAM it needs on the S3.
+    displayManager.begin();
+    displayManager.showTestPattern();
+    displayManager.startDisplay();
+    osc.beginRuntimeScripts();
 
     displayManager.clearAll();
+    displayManager.loadStartupParams();
     displayManager.update();
     Serial.println(networkUp
         ? "Ready — waiting for OSC messages + serial commands …"
         : "Ready — serial-only mode (no network) …");
+    Serial.println("SCRIPT_READY");
+#if SCOREBOARD_HAS_WIFI && SCOREBOARD_WIFI_ENABLED
     Serial.println("Tap AtomS3 button to toggle WiFi AP + web UI");
-#ifdef USE_M5UNIFIED
+#endif
+#if SCOREBOARD_HAS_M5UNIFIED
+#if SCOREBOARD_HAS_WIFI && SCOREBOARD_WIFI_ENABLED
+    if (!webUI.isRunning()) {
+        lcdShowIdle();
+    }
+#else
     lcdShowIdle();
+#endif
 #endif
 }
 
 // ── Loop ─────────────────────────────────────────────────────
 void loop() {
-#ifdef USE_M5UNIFIED
+#if SCOREBOARD_HAS_M5UNIFIED
     M5.update();         // poll button, etc.
     // Button A (screen tap on AtomS3) toggles AP on/off
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI && SCOREBOARD_WIFI_ENABLED
     if (M5.BtnA.wasPressed()) {
         toggleAP();
     }
 #endif
 #endif
     if (networkUp) osc.update();  // read & dispatch incoming OSC packets
-#ifdef USE_WIFI
+#if SCOREBOARD_HAS_WIFI && SCOREBOARD_WIFI_ENABLED
     webUI.update();               // handle web clients (no-op when AP is off)
 #endif
 #if SERIAL_CMD_ENABLED
     osc.processSerial(); // read & dispatch serial text commands
 #endif
-#ifdef USE_RS485
+#if SCOREBOARD_RS485_ENABLED
     osc.processRS485();  // read & dispatch RS485 text commands
 #endif
     displayManager.update();    // push pixel changes to the strip (no-op when idle)

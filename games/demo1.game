@@ -1,0 +1,33 @@
+# demo1.game
+# Text hold -> burst -> reassemble
+
+id 1
+name text_hold_burst_reassemble
+
+step intro
+wait 2000
+mode text
+text hello
+particles off
+
+step burst
+wait 5000
+text_to_particles
+text off
+
+particle gravityEnabled true
+particle collisionEnabled true
+particle scaffoldEnabled false
+particle scaffoldStrength 0.0
+particle temperature 1.0
+particles on
+physics running
+
+step rebuild
+wait 2500
+particle gravityEnabled false
+particle collisionEnabled false
+particle scaffoldEnabled true
+particle scaffoldStrength 2.2
+particle scaffoldRange 10.0
+particle temperature 0.0

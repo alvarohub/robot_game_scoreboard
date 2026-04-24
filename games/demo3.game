@@ -1,0 +1,37 @@
+# demo3.game
+# Infinite goto loop template: breathing scaffold motion.
+
+id 3
+name demo_infinite_goto_breathe
+
+step intro
+wait 1000
+mode text
+text on
+particles off
+
+step convert
+wait 500
+text off
+particles on
+text_to_particles
+physics running
+
+step inhale
+wait 2000
+particle damping 0.9999
+particle gravityEnabled true
+particle collisionEnabled false
+particle scaffoldEnabled false
+particle temperature 0.1
+
+step exhale
+wait 1200
+particle damping 0.8
+particle gravityEnabled false
+particle collisionEnabled false
+particle scaffoldEnabled true
+particle scaffoldStrength 5
+particle scaffoldRange 10.0
+particle temperature 0.00
+goto inhale forever

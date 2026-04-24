@@ -1,0 +1,42 @@
+# demo2.game
+# Finite goto loop template: pulse between tight and loose scaffold states.
+
+id 2
+name demo_finite_goto_pulse
+
+step intro
+wait 1200
+mode text
+text on
+particles off
+
+step explode
+wait 900
+text off
+particles on
+text_to_particles
+physics running
+
+step tight
+wait 700
+particle gravityEnabled false
+particle collisionEnabled false
+particle scaffoldEnabled true
+particle scaffoldStrength 1.8
+particle scaffoldRange 10.0
+particle temperature 0.08
+
+step loose
+wait 700
+particle gravityEnabled false
+particle collisionEnabled false
+particle scaffoldEnabled true
+particle scaffoldStrength 0.65
+particle scaffoldRange 10.0
+particle temperature 0.35
+goto tight repeat 4
+
+step settle
+wait 900
+physics paused
+text on

@@ -10,8 +10,8 @@ Usage:
     python gui_control.py /dev/ttyACM0     # explicit port
 
 Note: PlatformIO's bundled Python lacks tkinter.
-      Use system or conda Python, e.g.:
-        /opt/anaconda3/envs/ML/bin/python test/gui_control.py
+    On macOS, avoid the Command Line Tools Python + Tk 8.5 runtime.
+    Use a Python build with Tk 8.6+, e.g. python.org, Homebrew, or conda.
 """
 
 import sys
@@ -21,9 +21,47 @@ import time
 import queue
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk, colorchooser, scrolledtext, filedialog
 import serial
 import serial.tools.list_ports
+
+
+def _check_macos_tk_runtime_or_exit():
+    """Fail fast on macOS when Python is backed by the old Apple Tk 8.5 runtime."""
+    if sys.platform != "darwin":
+        return
+
+    try:
+        import _tkinter
+    except Exception:
+        return
+
+    tk_runtime_path = os.path.realpath(getattr(_tkinter, "__file__", ""))
+    tk_version = float(getattr(tk, "TkVersion", 0.0))
+    uses_clt_python = tk_runtime_path.startswith("/Library/Developer/CommandLineTools/")
+
+    if uses_clt_python and tk_version < 8.6:
+        msg = "\n".join([
+            "gui_control.py cannot start with this macOS Python/Tk runtime.",
+            "Detected: Command Line Tools Python linked to Apple Tk 8.5.",
+            "This combination aborts when creating a Tk window on newer macOS releases.",
+            "",
+            "Use a Python build with Tk 8.6+, for example:",
+            "  python.org Python",
+            "  Homebrew python3",
+            "  conda Python",
+            "",
+            "Typical setup:",
+            "  python3 -m venv .venv-tk",
+            "  source .venv-tk/bin/activate",
+            "  pip install pyserial",
+            "  python test/gui_control.py",
+            "",
+            "Alternative: use the scoreboard WiFi GUI from the firmware AP.",
+        ])
+        print(msg, file=sys.stderr)
+        raise SystemExit(1)
 
 # ── Serial helpers ────────────────────────────────────────────
 
@@ -44,6 +82,8 @@ def find_default_port():
 class ScoreboardGUI:
     BAUD = 115200
     SEND_THROTTLE_MS = 40  # min interval between repeated slider sends
+    DEVICE_BOOT_SYNC_DELAY_MS = 1200
+    SCRIPT_UPLOAD_SEND_INTERVAL_MS = 70
 
     def __init__(self, root, initial_port=None):
         self.root = root
@@ -62,6 +102,16 @@ class ScoreboardGUI:
         # Per-display state tracking (display numbers are 1-based)
         self._current_display = 1
         self._display_states = {n: self._default_display_state() for n in range(1, 7)}
+        self._captured_state = None
+        self._script_files = []
+        self._bank_slot_names = {slot: "" for slot in range(1, 6)}
+        self._selected_bank_slot = 1
+        self._pending_capture_path = None
+        self._esp_bank_var = tk.IntVar(value=1)
+        self._script_upload_in_progress = False
+        self._display_state_request_log_queue = {n: [] for n in range(1, 7)}
+
+        self._apply_compact_style()
 
         self._build_ui(initial_port)
 
@@ -69,6 +119,25 @@ class ScoreboardGUI:
         self._display_var.trace_add("write", self._on_display_change)
 
     # ── UI construction ───────────────────────────────────────
+
+    def _apply_compact_style(self):
+        """Reduce default Tk/ttk font sizes so the full UI fits typical desktops."""
+        base = tkfont.nametofont("TkDefaultFont")
+        base.configure(size=9)
+        tkfont.nametofont("TkTextFont").configure(size=9)
+        tkfont.nametofont("TkFixedFont").configure(size=9)
+        tkfont.nametofont("TkHeadingFont").configure(size=9)
+        tkfont.nametofont("TkMenuFont").configure(size=9)
+
+        style = ttk.Style()
+        style.configure("TLabel", font=base)
+        style.configure("TButton", font=base, padding=(4, 2))
+        style.configure("TCheckbutton", font=base)
+        style.configure("TRadiobutton", font=base)
+        style.configure("TLabelframe.Label", font=base)
+        style.configure("TEntry", font=base)
+        style.configure("TCombobox", font=base)
+        style.configure("TSpinbox", font=base)
 
     def _build_ui(self, initial_port):
         pad = dict(padx=6, pady=3)
@@ -146,23 +215,21 @@ class ScoreboardGUI:
         text_f.pack(fill="x", **pad)
 
         self._text_var = tk.StringVar()
-        text_entry = ttk.Entry(text_f, textvariable=self._text_var, width=16)
-        text_entry.grid(row=0, column=0, **pad)
+        text_entry = ttk.Entry(text_f, textvariable=self._text_var, width=36)
+        text_entry.grid(row=0, column=0, columnspan=3, sticky="ew", **pad)
         text_entry.bind("<Return>", lambda e: (self._send_text(), self.root.focus_set()))
-        ttk.Button(text_f, text="Send", command=self._send_text).grid(row=0, column=1, **pad)
-        ttk.Button(text_f, text="Push", command=self._ts_push).grid(row=0, column=2, **pad)
-        ttk.Button(text_f, text="Pop", command=self._ts_pop).grid(row=0, column=3, **pad)
-        ttk.Button(text_f, text="Clear stk", command=self._ts_clear).grid(row=0, column=4, **pad)
+        ttk.Button(text_f, text="Apply List", command=self._send_text).grid(row=0, column=3, **pad)
+        ttk.Button(text_f, text="Clear List", command=self._ts_clear).grid(row=0, column=4, **pad)
 
         self._scrollcont_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(text_f, text="Continuous", variable=self._scrollcont_var,
-                        command=self._on_scrollcontinuous).grid(row=0, column=5, **pad)
+                command=self._on_scrollcontinuous).grid(row=0, column=5, **pad)
 
         # Row 1: compact horizontal stack display
         ttk.Label(text_f, text="Stack:").grid(row=1, column=0, sticky="w", **pad)
-        self._ts_listbox = tk.Listbox(text_f, height=2, width=50, font=("Menlo", 9))
-        self._ts_listbox.grid(row=1, column=1, columnspan=4, sticky="ew", **pad)
-        ttk.Button(text_f, text="Update", command=self._ts_update_selected).grid(row=1, column=5, **pad)
+        self._ts_listbox = tk.Listbox(text_f, height=2, width=60, font=("Menlo", 9))
+        self._ts_listbox.grid(row=1, column=1, columnspan=5, sticky="ew", **pad)
+        text_f.columnconfigure(0, weight=1)
         text_f.columnconfigure(1, weight=1)
 
         # ── Text colour frame ─────────────────────────────────
@@ -252,7 +319,7 @@ class ScoreboardGUI:
         # Row 1: count + render interval + physics substep
         ttk.Label(part_f, text="Count:").grid(row=1, column=0, **pad)
         self._pcount_var = tk.IntVar(value=6)
-        ttk.Spinbox(part_f, from_=1, to=64, textvariable=self._pcount_var, width=4,
+        ttk.Spinbox(part_f, from_=0, to=64, textvariable=self._pcount_var, width=4,
                      command=self._send_particle_config).grid(row=1, column=1, sticky="w", **pad)
 
         ttk.Label(part_f, text="Render (ms):").grid(row=1, column=2, **pad)
@@ -418,14 +485,16 @@ class ScoreboardGUI:
                   orient="horizontal", length=100,
                   command=lambda *_: self._send_particle_config()).grid(row=10, column=5, **pad)
 
-        # Row 11: Text→Particles + Clear Particles + Pause Physics
+        # Row 11: Text→Particles + Add/Delete particles + Pause Physics
         ttk.Button(part_f, text="Text → Particles",
                    command=self._text_to_particles).grid(row=11, column=0, columnspan=2, **pad)
-        ttk.Button(part_f, text="Clear Particles",
-                   command=self._clear_particles).grid(row=11, column=2, **pad)
+        ttk.Button(part_f, text="Add Particle",
+               command=self._add_particle).grid(row=11, column=2, **pad)
+        ttk.Button(part_f, text="Delete All",
+               command=self._clear_particles).grid(row=11, column=3, **pad)
         self._physics_paused = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Pause Physics", variable=self._physics_paused,
-                        command=self._toggle_physics_pause).grid(row=11, column=3, columnspan=2, sticky="w", **pad)
+                command=self._toggle_physics_pause).grid(row=11, column=4, columnspan=2, sticky="w", **pad)
 
         # Row 12: View transform — rotation + scale
         ttk.Label(part_f, text="Rotate°:").grid(row=12, column=0, **pad)
@@ -477,22 +546,55 @@ class ScoreboardGUI:
             row=0, column=3, **pad
         )
 
-        # ── Presets frame (JSON save/load + ESP32 NVS) ────────
-        preset_f = ttk.LabelFrame(left_col, text="Presets")
-        preset_f.pack(fill="x", **pad)
+        # ── Animation bank + display assignment ───────────────
+        anim_f = ttk.LabelFrame(left_col, text="Animation Bank")
+        anim_f.pack(fill="x", **pad)
 
-        ttk.Button(preset_f, text="Save to JSON…", command=self._save_preset).grid(
-            row=0, column=0, **pad
+        anim_left = ttk.Frame(anim_f)
+        anim_left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        anim_right = ttk.Frame(anim_f)
+        anim_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        anim_f.columnconfigure(0, weight=1)
+        anim_f.columnconfigure(1, weight=1)
+
+        ttk.Label(anim_left, text="Bank slot:").grid(row=0, column=0, sticky="w", **pad)
+        self._bank_slot_choice_var = tk.StringVar()
+        self._bank_slot_combo = ttk.Combobox(
+            anim_left,
+            textvariable=self._bank_slot_choice_var,
+            state="readonly",
+            width=26,
         )
-        ttk.Button(preset_f, text="Load from JSON…", command=self._load_preset).grid(
-            row=0, column=1, **pad
+        self._bank_slot_combo.grid(row=1, column=0, columnspan=2, sticky="ew", **pad)
+        self._bank_slot_combo.bind("<<ComboboxSelected>>", self._on_bank_slot_selected)
+        ttk.Button(anim_left, text="Load File…", command=self._load_script_file_from_disk).grid(row=2, column=0, **pad)
+        ttk.Button(anim_left, text="Set To Display", command=self._assign_animation_to_display).grid(row=2, column=1, **pad)
+        anim_left.columnconfigure(0, weight=1)
+        anim_left.columnconfigure(1, weight=1)
+
+        self._animation_slot_var = tk.IntVar(value=0)
+        self._runtime_label_var = tk.StringVar(value=self._runtime_label_text(1))
+        ttk.Label(anim_right, textvariable=self._runtime_label_var).grid(row=0, column=0, sticky="w", **pad)
+        self._current_animation_name_var = tk.StringVar(value="default")
+        ttk.Label(anim_right, textvariable=self._current_animation_name_var).grid(row=1, column=0, sticky="w", **pad)
+        ttk.Button(anim_right, text="Start", command=self._start_animation).grid(row=2, column=0, sticky="ew", **pad)
+        ttk.Button(anim_right, text="Stop", command=self._stop_animation).grid(row=3, column=0, sticky="ew", **pad)
+        anim_right.columnconfigure(0, weight=1)
+
+        self._refresh_bank_slot_choices()
+
+        # ── Snapshots and session files ───────────────────────
+        snapshot_f = ttk.LabelFrame(left_col, text="Snapshot Parameters")
+        snapshot_f.pack(fill="x", **pad)
+
+        ttk.Button(snapshot_f, text="Capture To File…", command=self._capture_device_to_file).grid(
+            row=0, column=0, columnspan=2, sticky="ew", **pad
         )
-        ttk.Separator(preset_f, orient="vertical").grid(row=0, column=2, sticky="ns", padx=6)
-        ttk.Button(preset_f, text="Save to ESP32", command=self._save_to_esp).grid(
-            row=0, column=3, **pad
+        ttk.Button(snapshot_f, text="Save Parameter File…", command=self._save_preset).grid(
+            row=1, column=0, **pad
         )
-        ttk.Button(preset_f, text="Load from ESP32", command=self._load_from_esp).grid(
-            row=0, column=4, **pad
+        ttk.Button(snapshot_f, text="Load Parameter File…", command=self._load_preset).grid(
+            row=1, column=1, **pad
         )
 
         # ── Raw command ──────────────────────────────────────
@@ -539,11 +641,14 @@ class ScoreboardGUI:
             self._reader_thread.start()
             self._writer_thread = threading.Thread(target=self._serial_writer, daemon=True)
             self._writer_thread.start()
+            self.root.after(self.DEVICE_BOOT_SYNC_DELAY_MS, self._list_bank_slots)
+            self.root.after(self.DEVICE_BOOT_SYNC_DELAY_MS + 200, self._sync_all_displays)
         except serial.SerialException as e:
             self._log_msg(f"Connection error: {e}")
 
     def _disconnect(self):
         self._stop_reader.set()
+        self._script_upload_in_progress = False
         if self.ser:
             self.ser.close()
             self.ser = None
@@ -558,14 +663,35 @@ class ScoreboardGUI:
                 if self.ser and self.ser.is_open and self.ser.in_waiting:
                     line = self.ser.readline().decode("utf-8", errors="replace").rstrip()
                     if line:
-                        self.root.after(0, self._log_msg, f"[fw] {line}")
                         # Parse TEXT2PARTICLES response to sync GUI count
                         if line.startswith("TEXT2PARTICLES "):
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
                             try:
                                 n = int(line.split()[1])
                                 self.root.after(0, self._on_text2particles_count, n)
                             except (IndexError, ValueError):
                                 pass
+                        elif line.startswith("STARTUP_BANK "):
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
+                            try:
+                                bank = int(line.split()[1])
+                                self.root.after(0, self._esp_bank_var.set, bank)
+                            except (IndexError, ValueError):
+                                pass
+                        elif line.startswith("BANK_SLOT_LOADED "):
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
+                            self.root.after(0, self._on_bank_slot_loaded_line, line)
+                        elif line.startswith("BANK_SLOTS "):
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
+                            self.root.after(0, self._on_bank_slots_line, line)
+                        elif line.startswith("SCRIPT_FILE "):
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
+                            self.root.after(0, self._on_script_file_line, line)
+                        elif line.startswith("DISPLAY_STATE "):
+                            payload = line[len("DISPLAY_STATE "):].strip()
+                            self.root.after(0, self._on_display_state_line, payload)
+                        else:
+                            self.root.after(0, self._log_msg, f"[fw] {line}")
                 else:
                     time.sleep(0.02)  # avoid busy-loop when idle
             except Exception:
@@ -592,6 +718,8 @@ class ScoreboardGUI:
         return {
             "textEnabled": True,
             "mode": "text",
+            "animationSlot": 0,
+            "animationName": "default",
             "textBrightness": 255,
             "particlesEnabled": False,
             "particleBrightness": 255,
@@ -638,6 +766,8 @@ class ScoreboardGUI:
         return {
             "textEnabled": self._text_enabled.get(),
             "mode": self._mode_var.get(),
+            "animationSlot": self._animation_slot_var.get(),
+            "animationName": self._current_animation_name_var.get(),
             "textBrightness": self._text_brightness_var.get(),
             "particlesEnabled": self._particles_enabled.get(),
             "particleBrightness": self._particle_brightness_var.get(),
@@ -685,6 +815,9 @@ class ScoreboardGUI:
         try:
             self._text_enabled.set(state["textEnabled"])
             self._mode_var.set(state["mode"])
+            animation_slot = state.get("animationSlot", state.get("animationId", 0))
+            self._animation_slot_var.set(animation_slot)
+            self._current_animation_name_var.set(state.get("animationName", self._slot_name(animation_slot)))
             self._text_brightness_var.set(state["textBrightness"])
             self._text_bright_label.config(text=str(state["textBrightness"]))
             self._particles_enabled.set(state["particlesEnabled"])
@@ -699,6 +832,7 @@ class ScoreboardGUI:
             self._ts_listbox.delete(0, "end")
             for item in state["textStack"]:
                 self._ts_listbox.insert("end", item)
+            self._text_var.set(", ".join(state["textStack"]))
             # Particles
             p = state["particles"]
             self._pcount_var.set(p["count"])
@@ -761,15 +895,48 @@ class ScoreboardGUI:
         self._display_states[self._current_display] = self._snapshot_display_state()
         # Switch and restore
         self._current_display = new_display
+        self._update_runtime_label(new_display)
         self._restore_display_state(self._display_states[new_display])
+        if self.ser and self.ser.is_open:
+            self._schedule_display_sync(new_display, delay_ms=60)
 
-    def _send(self, cmd):
+    def _send(self, cmd, log=True):
         if not self.ser or not self.ser.is_open:
             self._log_msg("Not connected")
             return
         line = cmd.strip() + "\n"
         self._write_queue.put(line.encode("utf-8"))
-        self._log_msg(f"→ {cmd}")
+        if log:
+            self._log_msg(f"→ {cmd}")
+
+    def _send_command_sequence(self, commands, interval_ms=None, on_complete=None):
+        if interval_ms is None:
+            interval_ms = self.SCRIPT_UPLOAD_SEND_INTERVAL_MS
+
+        if self._script_upload_in_progress:
+            self._log_msg("Another animation file upload is already in progress")
+            return False
+        if not self.ser or not self.ser.is_open:
+            self._log_msg("Not connected")
+            return False
+
+        command_list = list(commands)
+        self._script_upload_in_progress = True
+
+        def send_next(index):
+            if not self.ser or not self.ser.is_open:
+                self._script_upload_in_progress = False
+                return
+            if index >= len(command_list):
+                self._script_upload_in_progress = False
+                if on_complete:
+                    on_complete()
+                return
+            self._send(command_list[index])
+            self.root.after(interval_ms, lambda: send_next(index + 1))
+
+        send_next(0)
+        return True
 
     def _disp_prefix(self):
         return f"/display/{self._display_var.get()}"
@@ -787,6 +954,338 @@ class ScoreboardGUI:
         if self._loading: return
         en = 1 if self._particles_enabled.get() else 0
         self._send(f"{self._disp_prefix()}/particles/enable {en}")
+
+    def _selected_animation_slot(self):
+        return max(1, min(5, self._selected_bank_slot))
+
+    def _runtime_label_text(self, display_number):
+        return f"Current Animation D{display_number}:"
+
+    def _update_runtime_label(self, display_number=None):
+        if display_number is None:
+            display_number = self._display_var.get()
+        self._runtime_label_var.set(self._runtime_label_text(display_number))
+
+    def _slot_name(self, slot):
+        if slot <= 0:
+            return "default"
+        name = self._bank_slot_names.get(slot, "")
+        if not name:
+            return f"slot {slot}"
+        if name == "EMPTY":
+            return f"slot {slot} (empty)"
+        return name
+
+    def _bank_slot_option_label(self, slot):
+        name = self._bank_slot_names.get(slot, "")
+        if not name:
+            name = "empty"
+        elif name == "EMPTY":
+            name = "empty"
+        return f"{slot}: {name}"
+
+    def _refresh_bank_slot_choices(self):
+        options = [self._bank_slot_option_label(slot) for slot in range(1, 6)]
+        self._bank_slot_combo["values"] = options
+        self._set_bank_slot_choice(self._selected_bank_slot)
+
+    def _set_bank_slot_choice(self, slot):
+        self._selected_bank_slot = max(1, min(5, int(slot)))
+        self._bank_slot_choice_var.set(self._bank_slot_option_label(self._selected_bank_slot))
+
+    def _on_bank_slot_selected(self, *_):
+        choice = self._bank_slot_choice_var.get().strip()
+        try:
+            slot = int(choice.split(":", 1)[0])
+        except (ValueError, IndexError):
+            slot = 1
+        self._set_bank_slot_choice(slot)
+
+    def _assign_animation_to_display(self):
+        if self._loading:
+            return
+        slot = self._selected_animation_slot()
+        self._send(f"{self._disp_prefix()}/animation {slot}")
+        self._schedule_display_sync()
+
+    def _start_animation(self):
+        if self._loading:
+            return
+        self._send(f"{self._disp_prefix()}/animation/start")
+        self._schedule_display_sync()
+
+    def _stop_animation(self):
+        if self._loading:
+            return
+        self._send(f"{self._disp_prefix()}/animation/stop")
+        self._schedule_display_sync()
+
+    def _request_display_state(self, display_number=None, log=True):
+        target = display_number if display_number is not None else self._display_var.get()
+        try:
+            target = int(target)
+        except (TypeError, ValueError, tk.TclError):
+            return
+        if target < 1 or target > 6:
+            return
+        self._display_state_request_log_queue[target].append(bool(log))
+        self._send(f"/display/{target}/state", log=log)
+
+    def _schedule_display_sync(self, display_number=None, delay_ms=150, log=True):
+        target = display_number if display_number is not None else self._display_var.get()
+        self.root.after(delay_ms, lambda t=target, should_log=log: self._request_display_state(t, log=should_log))
+
+    def _sync_all_displays(self):
+        for index in range(1, 7):
+            self.root.after((index - 1) * 80, lambda target=index: self._request_display_state(target, log=False))
+
+    def _script_file_name(self):
+        name = self._script_file_var.get().strip()
+        if not name:
+            self._log_msg("Enter a script file name first")
+            return None
+        return name
+
+    def _set_script_file_choices(self):
+        return
+
+    def _on_script_file_line(self, line):
+        # Expected firmware output: SCRIPT_FILE /games/foo.game 123
+        if line.strip() == "SCRIPT_FILE NONE":
+            self._script_files = []
+            self._set_script_file_choices()
+            return
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "SCRIPT_FILE":
+            path = parts[1]
+            if path not in self._script_files:
+                self._script_files.append(path)
+                self._script_files.sort()
+                self._set_script_file_choices()
+
+    def _on_bank_slots_line(self, line):
+        payload = line[len("BANK_SLOTS "):].strip()
+        updated_names = {slot: "EMPTY" for slot in range(1, 6)}
+        if payload:
+            for entry in payload.split(";"):
+                entry = entry.strip()
+                if not entry or ":" not in entry:
+                    continue
+                slot_text, name = entry.split(":", 1)
+                try:
+                    slot = int(slot_text.strip())
+                except ValueError:
+                    continue
+                if 1 <= slot <= 5:
+                    clean_name = name.strip() or "EMPTY"
+                    updated_names[slot] = clean_name
+
+        self._bank_slot_names.update(updated_names)
+        self._refresh_bank_slot_choices()
+
+    def _on_bank_slot_loaded_line(self, line):
+        parts = line.split(maxsplit=2)
+        if len(parts) < 3 or parts[0] != "BANK_SLOT_LOADED":
+            return
+        try:
+            slot = int(parts[1])
+        except ValueError:
+            return
+        self._bank_slot_names[slot] = parts[2]
+        self._set_bank_slot_choice(slot)
+        self._refresh_bank_slot_choices()
+        self._log_msg(f"Bank slot {slot} loaded: {parts[2]}")
+        # Ask the device for the authoritative slot list after the upload/commit ack.
+        self.root.after(80, self._list_bank_slots)
+
+    def _merge_display_state_from_device(self, state):
+        try:
+            display_number = int(state.get("display", self._current_display))
+        except (TypeError, ValueError):
+            display_number = self._current_display
+
+        merged = self._default_display_state()
+        existing = self._display_states.get(display_number)
+        if existing:
+            merged.update({k: v for k, v in existing.items() if k != "particles"})
+            merged["particles"].update(existing.get("particles", {}))
+
+        slot = int(state.get("animationSlot", state.get("animationId", merged["animationSlot"])))
+        merged["animationSlot"] = slot
+        merged["animationName"] = state.get("animationName", self._slot_name(slot))
+        merged["mode"] = state.get("mode", merged["mode"])
+        merged["textEnabled"] = state.get("textEnabled", merged["textEnabled"])
+        merged["particlesEnabled"] = state.get("particlesEnabled", merged["particlesEnabled"])
+        merged["textBrightness"] = state.get("textBrightness", merged["textBrightness"])
+        merged["particleBrightness"] = state.get("particleBrightness", merged["particleBrightness"])
+
+        text_color = state.get("textColor")
+        if isinstance(text_color, list) and len(text_color) == 3:
+            merged["color"] = tuple(int(value) for value in text_color)
+
+        particle_color = state.get("particleColor")
+        if isinstance(particle_color, list) and len(particle_color) == 3:
+            merged["particleColor"] = tuple(int(value) for value in particle_color)
+
+        text_items = state.get("textItems")
+        if isinstance(text_items, list):
+            merged["textStack"] = [str(item) for item in text_items if str(item).strip()]
+
+        if int(state.get("textCount", len(merged["textStack"]))) == 0:
+            merged["textStack"] = []
+
+        particles = state.get("particles", {})
+        particle_state = merged["particles"]
+        for key in (
+            "count", "renderMs", "substepMs", "gravityScale", "gravityEnabled",
+            "collisionEnabled", "elasticity", "wallElasticity", "damping", "radius",
+            "renderStyle", "glowSigma", "glowWavelength", "temperature",
+            "attractStrength", "attractRange", "speedColor", "springStrength",
+            "springRange", "springEnabled", "coulombStrength", "coulombRange",
+            "coulombEnabled", "scaffoldStrength", "scaffoldRange", "scaffoldEnabled",
+            "physicsPaused", "viewRotation", "viewTx", "viewTy"
+        ):
+            if key in particles:
+                particle_state[key] = particles[key]
+        if "viewScaleX" in particles:
+            particle_state["viewScale"] = particles["viewScaleX"]
+
+        scroll = state.get("scroll", {})
+        if "stepMs" in scroll:
+            self._scrollspeed_var.set(int(scroll["stepMs"]))
+            self._scrollspeed_label.config(text=str(int(scroll["stepMs"])))
+        if "continuous" in scroll:
+            self._scrollcont_var.set(bool(scroll["continuous"]))
+
+        return display_number, merged
+
+    def _on_display_state_line(self, payload):
+        try:
+            state = json.loads(payload)
+        except json.JSONDecodeError:
+            self._log_msg("Could not parse DISPLAY_STATE payload")
+            return
+        self._captured_state = state
+        display_number, merged = self._merge_display_state_from_device(state)
+        request_queue = self._display_state_request_log_queue.get(display_number, [])
+        should_log_sync = request_queue.pop(0) if request_queue else False
+        self._display_states[display_number] = merged
+        if display_number == self._current_display:
+            self._restore_display_state(merged)
+        if self._pending_capture_path and display_number == self._current_display:
+            path = self._pending_capture_path
+            self._pending_capture_path = None
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            self._log_msg(f"Captured device parameters saved → {path}")
+        elif should_log_sync:
+            self._log_msg(f"Display {display_number} synchronized from device")
+
+    def _capture_display_state(self):
+        self._request_display_state(self._current_display)
+
+    def _capture_device_to_file(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(__file__),
+            title="Capture current device parameters",
+        )
+        if not path:
+            return
+        self._pending_capture_path = path
+        self._capture_display_state()
+
+    def _save_captured_state(self):
+        if not self._captured_state:
+            self._log_msg("No captured device state yet.")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(__file__),
+            title="Save captured device state",
+        )
+        if not path:
+            return
+        with open(path, "w") as f:
+            json.dump(self._captured_state, f, indent=2)
+        self._log_msg(f"Captured state saved → {path}")
+
+    def _save_settings_capture(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(__file__),
+            title="Save particle/text settings capture",
+        )
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self._gather_params(), f, indent=2)
+        self._log_msg(f"Settings capture saved → {path}")
+
+    def _load_script_file(self):
+        name = self._script_file_name()
+        if name:
+            slot = self._selected_animation_slot()
+            if slot < 1:
+                self._log_msg("Choose bank slot 1..5 before storing a file")
+                return
+            self._send(f'/script/bank/load {slot} "{name}"')
+            self._list_bank_slots()
+
+    def _load_script_file_from_disk(self):
+        path = filedialog.askopenfilename(
+            filetypes=[("Game script files", "*.game"), ("Text files", "*.txt"), ("All files", "*.*")],
+            initialdir=os.path.dirname(__file__),
+            title="Load animation file from computer",
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except OSError as e:
+            self._log_msg(f"Could not open animation file: {e}")
+            return
+
+        slot = self._selected_animation_slot()
+        if slot < 1:
+            self._log_msg("Choose bank slot 1..5 before storing a file")
+            return
+
+        commands = ["/script/begin"]
+        for line in lines:
+            safe = line.replace('\\', '\\\\').replace('"', '\\"')
+            commands.append(f'/script/append "{safe}"')
+        commands.append(f"/script/bank/commit {slot}")
+
+        started = self._send_command_sequence(
+            commands,
+            on_complete=lambda: self.root.after(200, self._list_bank_slots),
+        )
+        if started:
+            self._log_msg(f"Updating slot {slot} from file: {path}")
+
+    def _save_script_file(self):
+        name = self._script_file_name()
+        if name:
+            self._send(f'/script/save "{name}"')
+
+    def _delete_script_file(self):
+        name = self._script_file_name()
+        if name:
+            self._send(f'/script/delete "{name}"')
+
+    def _list_script_files(self):
+        self._script_files = []
+        self._set_script_file_choices()
+        self._send("/script/files")
+
+    def _list_bank_slots(self):
+        self._send("/script/bank/list")
 
     def _on_text_brightness(self):
         val = self._text_brightness_var.get()
@@ -810,11 +1309,24 @@ class ScoreboardGUI:
             self._pcolor_preview.config(bg=self._pcolor_hex())
             self._send(f"{self._disp_prefix()}/particles/color {r} {g} {b}")
 
+    def _parse_text_stack_input(self, text):
+        raw = text.strip()
+        if len(raw) >= 2 and raw[0] in "[{" and raw[-1] in "]}":
+            raw = raw[1:-1].strip()
+        if not raw:
+            return []
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
     def _send_text(self):
-        text = self._text_var.get()
-        if text:
-            self._send(f'{self._disp_prefix()} "{text}"')
-            self._text_var.set("")
+        text = self._text_var.get().strip()
+        if not text:
+            return
+        safe = text.replace('\\', '\\\\').replace('"', '\\"')
+        self._send(f'{self._disp_prefix()}/text/stack "{safe}"')
+        self._ts_listbox.delete(0, "end")
+        for item in self._parse_text_stack_input(text):
+            self._ts_listbox.insert("end", item)
+        self._schedule_display_sync(log=False)
 
     def _pick_color(self):
         result = colorchooser.askcolor(initialcolor=self._color_hex())
@@ -936,10 +1448,17 @@ class ScoreboardGUI:
         self._pradius_label.config(text="0.35")
 
     def _clear_particles(self):
-        self._send(f"{self._disp_prefix()}/particles/enable 0")
-        self._send(f"{self._disp_prefix()}/particles/pause 0")
+        self._send(f"{self._disp_prefix()}/particles/clear")
+        self._pcount_var.set(0)
         self._particles_enabled.set(False)
         self._physics_paused.set(False)
+        self._schedule_display_sync(log=False)
+
+    def _add_particle(self):
+        self._send(f"{self._disp_prefix()}/particles/add")
+        self._particles_enabled.set(True)
+        self._pcount_var.set(min(64, self._pcount_var.get() + 1))
+        self._schedule_display_sync(log=False)
 
     def _toggle_physics_pause(self):
         if self._loading:
@@ -1017,6 +1536,7 @@ class ScoreboardGUI:
     def _ts_clear(self):
         self._ts_listbox.delete(0, "end")
         self._send(f"{self._disp_prefix()}/text/clear")
+        self._text_var.set("")
 
     # ── Presets (JSON) ────────────────────────────────────────
 
@@ -1105,6 +1625,12 @@ class ScoreboardGUI:
                         self._mode_var.set(mode)
                 elif "mode" in d:
                     self._mode_var.set(d["mode"])
+                if "animationSlot" in d:
+                    self._animation_slot_var.set(d["animationSlot"])
+                    self._current_animation_name_var.set(d.get("animationName", self._slot_name(d["animationSlot"])))
+                elif "animationId" in d:
+                    self._animation_slot_var.set(d["animationId"])
+                    self._current_animation_name_var.set(d.get("animationName", self._slot_name(d["animationId"])))
                 if "particlesEnabled" in d:
                     self._particles_enabled.set(d["particlesEnabled"])
                 if "textEnabled" in d:
@@ -1191,26 +1717,26 @@ class ScoreboardGUI:
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             initialdir=os.path.dirname(__file__),
-            title="Save preset",
+            title="Save parameter file",
         )
         if not path:
             return
         with open(path, "w") as f:
             json.dump(self._gather_params(), f, indent=2)
-        self._log_msg(f"Preset saved → {path}")
+        self._log_msg(f"Parameter file saved → {path}")
 
     def _load_preset(self):
         path = filedialog.askopenfilename(
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             initialdir=os.path.dirname(__file__),
-            title="Load preset",
+            title="Load parameter file",
         )
         if not path:
             return
         with open(path, "r") as f:
             d = json.load(f)
         self._apply_params(d)
-        self._log_msg(f"Preset loaded ← {path}")
+        self._log_msg(f"Parameter file loaded ← {path}")
 
         # Push global settings to device
         self._send(f"/brightness {self._brightness_var.get()}")
@@ -1224,6 +1750,7 @@ class ScoreboardGUI:
             self._send(f"{prefix}/text/enable {1 if st['textEnabled'] else 0}")
             self._send(f"{prefix}/particles/enable {1 if st['particlesEnabled'] else 0}")
             self._send(f"{prefix}/mode {st['mode']}")
+            self._send(f"{prefix}/animation {st.get('animationSlot', st.get('animationId', 0))}")
             r, g, b = st["color"]
             self._send(f"{prefix}/color {r} {g} {b}")
             self._send(f"{prefix}/text/brightness {st['textBrightness']}")
@@ -1252,15 +1779,33 @@ class ScoreboardGUI:
                 f" {1 if p.get('collisionEnabled', True) else 0}"
             )
 
-    # ── ESP32 NVS save / load ─────────────────────────────────
+    # ── ESP32 NVS banks ────────────────────────────────────────
 
-    def _save_to_esp(self):
-        self._send("/saveparams")
-        self._log_msg("Sent /saveparams to ESP32")
+    def _bank_value(self):
+        try:
+            b = int(self._esp_bank_var.get())
+        except (TypeError, ValueError):
+            b = 1
+        return max(1, min(5, b))
 
-    def _load_from_esp(self):
-        self._send("/loadparams")
-        self._log_msg("Sent /loadparams to ESP32")
+    def _save_to_esp_bank(self):
+        b = self._bank_value()
+        self._send(f"/saveparams {b}")
+        self._log_msg(f"Sent /saveparams {b} to ESP32")
+
+    def _load_from_esp_bank(self):
+        b = self._bank_value()
+        self._send(f"/loadparams {b}")
+        self._log_msg(f"Sent /loadparams {b} to ESP32")
+
+    def _set_startup_bank(self):
+        b = self._bank_value()
+        self._send(f"/startupbank {b}")
+        self._log_msg(f"Sent /startupbank {b} to ESP32")
+
+    def _query_startup_bank(self):
+        self._send("/startupbank")
+        self._log_msg("Sent /startupbank (query)")
 
     def _send_raw(self):
         cmd = self._raw_var.get()
@@ -1282,8 +1827,10 @@ class ScoreboardGUI:
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_default_port()
 
+    _check_macos_tk_runtime_or_exit()
+
     root = tk.Tk()
-    root.geometry("1600x820")
+    root.geometry("1360x760")
     app = ScoreboardGUI(root, initial_port=port)
 
     # Auto-connect if a port was found/specified

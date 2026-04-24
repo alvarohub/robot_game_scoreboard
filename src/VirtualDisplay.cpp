@@ -1,4 +1,5 @@
 #include "VirtualDisplay.h"
+#include <Arduino.h>
 #include <cstring>
 #include <math.h>
 
@@ -36,6 +37,18 @@ static void _applySpeedColors(ParticleSystem& ps) {
         Particle& p = ps.particle(i);
         p.color = _heatColor(p.vel.length(), maxSpd);
     }
+}
+
+static String trimAscii(const String& value) {
+    size_t start = 0;
+    size_t end = value.length();
+    while (start < end && (uint8_t)value[start] <= ' ') {
+        start++;
+    }
+    while (end > start && (uint8_t)value[end - 1] <= ' ') {
+        end--;
+    }
+    return value.substring(start, end);
 }
 
 // ── Constructor ──────────────────────────────────────────────
@@ -151,10 +164,9 @@ void VirtualDisplay::clear() {
     _scrollOffset = 0;
     _scrollJustDone = false;
     _continuousIdx = 0;
-    _particleSys.reset();
-    _lastParticleStep = 0;
     _resetQueue();
     _modeConfig.mode = DISPLAY_MODE_TEXT;
+    _modeConfig.textEnabled = false;
     _modeConfig.particlesEnabled = false;
     fillScreen(0);
     _dirty = true;
@@ -201,6 +213,61 @@ void VirtualDisplay::textClear() {
     _resetQueue();
     fillScreen(0);
     _dirty = true;
+}
+
+bool VirtualDisplay::replaceTextStack(const char* textList) {
+    textClear();
+
+    String list = trimAscii(textList ? String(textList) : String());
+    if (list.length() >= 2) {
+        char first = list[0];
+        char last = list[list.length() - 1];
+        if ((first == '{' && last == '}') || (first == '[' && last == ']')) {
+            list = trimAscii(list.substring(1, list.length() - 1));
+        }
+    }
+    if (list.isEmpty()) {
+        return true;
+    }
+
+    int start = 0;
+    while (start <= (int)list.length() && _textStackCount < TEXT_STACK_MAX) {
+        int comma = list.indexOf(',', start);
+        if (comma < 0) {
+            comma = list.length();
+        }
+        String item = trimAscii(list.substring(start, comma));
+        if (!item.isEmpty()) {
+            textPush(item.c_str());
+        }
+        start = comma + 1;
+        if (comma >= (int)list.length()) {
+            break;
+        }
+    }
+
+    if (_textStackCount == 0) {
+        return true;
+    }
+
+    if (_isScrollMode()) {
+        _continuousIdx = 0;
+        _startScroll(_textStack[0]);
+        for (uint8_t index = 1; index < _textStackCount && _queueCount < SCROLL_QUEUE_SIZE; index++) {
+            strncpy(_queue[_queueTail], _textStack[index], TEXT_MAX_LEN - 1);
+            _queue[_queueTail][TEXT_MAX_LEN - 1] = '\0';
+            _queueTail = (_queueTail + 1) % SCROLL_QUEUE_SIZE;
+            _queueCount++;
+        }
+    } else {
+        const char* active = _activeText();
+        strncpy(_text, active, sizeof(_text) - 1);
+        _text[sizeof(_text) - 1] = '\0';
+        _oldText[0] = '\0';
+        _dirty = true;
+    }
+
+    return true;
 }
 
 const char* VirtualDisplay::_activeText() const {
@@ -457,16 +524,16 @@ uint16_t VirtualDisplay::screenToParticles() {
 
     if (count == 0) return 0;
 
-    // Configure particles for glow, physics paused, scaffold spring active
+    // Configure particles for a live glow cloud based on the rendered screen.
     _modeConfig.particles.count         = count;
     _modeConfig.particles.renderStyle   = ParticleModeConfig::RENDER_GLOW;
     _modeConfig.particles.glowSigma     = 0.6f;
-    _modeConfig.particles.physicsPaused = true;
+    _modeConfig.particles.physicsPaused = false;
     _modeConfig.particles.gravityEnabled = true;
     _modeConfig.particles.radius        = 0.35f;
-    _modeConfig.particles.collisionEnabled = false; // scaffold: no bumping
-    _modeConfig.particles.scaffoldEnabled  = true;  // spring to original positions
-    _modeConfig.particles.scaffoldStrength = 1.0f;
+    _modeConfig.particles.collisionEnabled = true;
+    _modeConfig.particles.scaffoldEnabled  = false;
+    _modeConfig.particles.scaffoldStrength = 0.0f;
     _modeConfig.particles.scaffoldRange    = 10.0f;
 
     // Create particles at scanned positions (uniform color placeholder)
@@ -479,6 +546,10 @@ uint16_t VirtualDisplay::screenToParticles() {
     // Overwrite each particle's colour with its original pixel colour
     for (uint16_t i = 0; i < count; i++) {
         _particleSys.particle(i).color = colors[i];
+        _particleSys.particle(i).vel = Vec2f(
+            ((int)random(-100, 101)) * 0.003f,
+            ((int)random(-100, 101)) * 0.003f
+        );
     }
     // Re-snapshot scaffold so it captures the per-pixel colours
     _particleSys.saveScaffold();
@@ -491,6 +562,79 @@ uint16_t VirtualDisplay::screenToParticles() {
 
     Serial.printf("SCREEN2PARTICLES %d\n", count);
     return count;
+}
+
+void VirtualDisplay::clearParticles() {
+    _particleSys.reset();
+    _modeConfig.particles.count = 0;
+    _modeConfig.particlesEnabled = false;
+    _modeConfig.particles.physicsPaused = false;
+    _lastParticleStep = 0;
+    _lastParticleRender = 0;
+    _dirty = true;
+}
+
+uint16_t VirtualDisplay::addRandomParticle(uint8_t amount) {
+    if (amount == 0) {
+        return _particleSys.count();
+    }
+
+    uint16_t currentCount = _particleSys.count();
+    uint16_t targetCount = currentCount + amount;
+    if (targetCount > ParticleSystem::MAX_PARTICLES) {
+        targetCount = ParticleSystem::MAX_PARTICLES;
+    }
+    if (targetCount == currentCount) {
+        _modeConfig.particlesEnabled = true;
+        _dirty = true;
+        return currentCount;
+    }
+
+    Vec2f positions[ParticleSystem::MAX_PARTICLES];
+    uint16_t colors[ParticleSystem::MAX_PARTICLES];
+    for (uint16_t index = 0; index < currentCount; index++) {
+        const Particle& particle = _particleSys.particle(index);
+        positions[index] = particle.pos;
+        colors[index] = particle.color;
+    }
+
+    float radius = _modeConfig.particles.radius;
+    if (radius < 0.1f) {
+        radius = 0.1f;
+    }
+    float minX = radius;
+    float maxX = (float)width() - 1.0f - radius;
+    if (maxX < minX) {
+        maxX = minX;
+    }
+    float minY = radius;
+    float maxY = (float)height() - 1.0f - radius;
+    if (maxY < minY) {
+        maxY = minY;
+    }
+
+    for (uint16_t index = currentCount; index < targetCount; index++) {
+        float px = random((long)(minX * 1000.0f), (long)(maxX * 1000.0f) + 1L) / 1000.0f;
+        float py = random((long)(minY * 1000.0f), (long)(maxY * 1000.0f) + 1L) / 1000.0f;
+        positions[index] = Vec2f(px, py);
+        colors[index] = _modeConfig.particleColor;
+    }
+
+    _modeConfig.particles.count = targetCount;
+    _particleSys.setConfig(_modeConfig.particles.toSystemConfig());
+    _particleSys.initFromPositions(positions, targetCount,
+                                   (float)width(), (float)height(),
+                                   radius, _modeConfig.particleColor);
+    for (uint16_t index = 0; index < targetCount; index++) {
+        _particleSys.particle(index).color = colors[index];
+    }
+    _particleSys.saveScaffold();
+
+    _modeConfig.particlesEnabled = true;
+    _lastParticleStep = millis();
+    _lastParticleRender = _lastParticleStep;
+    _dirty = true;
+    return targetCount;
 }
 
 void VirtualDisplay::clearQueue() {

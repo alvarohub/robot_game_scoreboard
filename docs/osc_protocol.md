@@ -202,34 +202,34 @@ Global forms available for all three.
 Up to **26 positional arguments**, all optional (missing args keep
 current values):
 
-| Arg | Name              | Type    | Default |
-| --- | ----------------- | ------- | ------- |
-| 0   | count             | int     | 6       |
-| 1   | renderMs          | int     | 20      |
-| 2   | gravityScale      | float   | 18.0    |
-| 3   | elasticity        | float   | 0.92    |
-| 4   | wallElasticity    | float   | 0.78    |
-| 5   | radius            | float   | 0.45    |
-| 6   | renderStyle       | int     | 4       |
-| 7   | glowSigma         | float   | 1.2     |
-| 8   | temperature       | float   | 0.0     |
-| 9   | attractStrength   | float   | 0.0     |
-| 10  | attractRange      | float   | 3.0     |
-| 11  | gravityEnabled    | int     | 1       |
-| 12  | substepMs         | int     | 20      |
-| 13  | damping           | float   | 0.9998  |
-| 14  | glowWavelength    | float   | 0.0     |
-| 15  | speedColor        | int     | 0       |
-| 16  | springStrength    | float   | 0.0     |
-| 17  | springRange       | float   | 5.0     |
-| 18  | springEnabled     | int     | 0       |
-| 19  | coulombStrength   | float   | 0.0     |
-| 20  | coulombRange      | float   | 10.0    |
-| 21  | coulombEnabled    | int     | 0       |
-| 22  | scaffoldStrength  | float   | 0.0     |
-| 23  | scaffoldRange     | float   | 10.0    |
-| 24  | scaffoldEnabled   | int     | 0       |
-| 25  | collisionEnabled  | int     | 1       |
+| Arg | Name             | Type  | Default |
+| --- | ---------------- | ----- | ------- |
+| 0   | count            | int   | 6       |
+| 1   | renderMs         | int   | 20      |
+| 2   | gravityScale     | float | 18.0    |
+| 3   | elasticity       | float | 0.92    |
+| 4   | wallElasticity   | float | 0.78    |
+| 5   | radius           | float | 0.45    |
+| 6   | renderStyle      | int   | 4       |
+| 7   | glowSigma        | float | 1.2     |
+| 8   | temperature      | float | 0.0     |
+| 9   | attractStrength  | float | 0.0     |
+| 10  | attractRange     | float | 3.0     |
+| 11  | gravityEnabled   | int   | 1       |
+| 12  | substepMs        | int   | 20      |
+| 13  | damping          | float | 0.9998  |
+| 14  | glowWavelength   | float | 0.0     |
+| 15  | speedColor       | int   | 0       |
+| 16  | springStrength   | float | 0.0     |
+| 17  | springRange      | float | 5.0     |
+| 18  | springEnabled    | int   | 0       |
+| 19  | coulombStrength  | float | 0.0     |
+| 20  | coulombRange     | float | 10.0    |
+| 21  | coulombEnabled   | int   | 0       |
+| 22  | scaffoldStrength | float | 0.0     |
+| 23  | scaffoldRange    | float | 10.0    |
+| 24  | scaffoldEnabled  | int   | 0       |
+| 25  | collisionEnabled | int   | 1       |
 
 Render styles: `0`=point, `1`=square, `2`=circle, `3`=text, `4`=glow.
 
@@ -269,6 +269,26 @@ Global forms: `/text/push`, `/text/pop`, `/text/set`, `/text/clear`, `/text/list
 ```
 /scrollcontinuous <0|1>    — auto-cycle text stack in scroll mode
 /defaults                  — reset all params to compiled defaults
+/script/begin              — start staged runtime script upload
+/script/append "line"      — append one `.game` source line
+/script/commit             — parse/install staged script text
+/script/cancel             — discard staged script text
+/script/save "file"        — save staged script text to SPIFFS
+/script/load "file"        — load + install a stored `.game` file
+/script/delete "file"      — delete a stored `.game` file from SPIFFS
+/script/files              — list stored `.game` files
+/script/list               — list loaded runtime scripts
+/script/unload <id>        — unload one runtime script by id
+/script/status             — show storage + staging + runtime counts
+```
+
+Runtime scripts use the same `.game` text syntax as the build-time demo
+files. Once a runtime script is committed or loaded, trigger it with the
+existing animation selectors:
+
+```
+/animation <id>
+/display/<N>/animation <id>
 ```
 
 ---

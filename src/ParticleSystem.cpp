@@ -212,7 +212,7 @@ void ParticleSystem::_constrainWalls() {
 void ParticleSystem::_interParticleInteraction() {
     // Which forces are active this frame?
     bool doCollide = _config.collisionEnabled;
-    bool doAttract = (_config.attractStrength > 0.0f);
+    bool doAttract = (_config.attractEnabled && _config.attractStrength != 0.0f);
     bool doSpring  = (_config.springEnabled && _config.springRange > 0.0f);
     bool doCoulomb = (_config.coulombEnabled && _config.coulombRange > 0.0f);
 

@@ -16,3 +16,6 @@ src/credentials.h
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# Build-generated animation catalog
+src/generated/GameScripts.generated.h

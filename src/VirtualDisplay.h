@@ -76,6 +76,7 @@ struct ParticleModeConfig {
     float   temperature    = 0.0f;     // Langevin jitter magnitude
     float   attractStrength = 0.0f;    // inter-particle attraction (0 = off)
     float   attractRange   = 3.0f;     // interaction range (× sum-of-radii)
+    bool    attractEnabled = true;
     bool    gravityEnabled = true;
     bool    collisionEnabled = true;     // hard-sphere collision
 
@@ -127,6 +128,7 @@ struct ParticleModeConfig {
         c.temperature   = temperature;
         c.attractStrength = attractStrength;
         c.attractRange  = attractRange;
+        c.attractEnabled = attractEnabled;
         c.gravityEnabled = gravityEnabled;
         c.collisionEnabled = collisionEnabled;
         c.springStrength = springStrength;
@@ -187,6 +189,8 @@ public:
     const char* textGet(uint8_t index) const;
     /// Clear the entire stack (count → 0).
     void textClear();
+    /// Replace the entire stack from a comma-separated list.
+    bool replaceTextStack(const char* textList);
     /// Number of entries currently in the stack.
     uint8_t textCount() const { return _textStackCount; }
     /// Max entries (compile-time constant).
@@ -224,6 +228,12 @@ public:
     /// each pixel's colour.  Does NOT re-render — captures the screen as-is.
     /// Enables particles with physics paused + glow.  Returns particle count.
     uint16_t screenToParticles();
+
+    /// Delete all particles and disable the particle layer.
+    void clearParticles();
+    /// Append random particles to the existing system and enable the layer.
+    uint16_t addRandomParticle(uint8_t amount = 1);
+    uint16_t particleCount() const { return _particleSys.count(); }
 
     /// Set physics paused flag (freeze/unfreeze dynamics).
     void setPhysicsPaused(bool paused);
@@ -293,7 +303,7 @@ private:
     // Glow / interference accumulation buffer
     // 6 floats per pixel: Re_R, Im_R, Re_G, Im_G, Re_B, Im_B
     // (plain glow only uses Re channels; interference uses all 6)
-    static constexpr uint16_t MAX_GLOW_PIXELS = 64 * 16; // generous max
+    static constexpr uint16_t MAX_GLOW_PIXELS = MATRIX_TILE_WIDTH * MATRIX_TILE_HEIGHT;
     float _glowBuf[MAX_GLOW_PIXELS * 6];
 
     // Scroll queue (ring buffer)
