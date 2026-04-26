@@ -40,6 +40,7 @@ public:
     const String& lastInstalledName() const { return _lastInstalledName; }
 
 private:
+    String _resolveStoredScriptPath(const String& normalizedPath);
     bool _storageReady = false;
     bool _uploadActive = false;
     String _stagedSource;

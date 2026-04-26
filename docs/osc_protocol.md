@@ -270,19 +270,19 @@ Global forms: `/text/push`, `/text/pop`, `/text/set`, `/text/clear`, `/text/list
 /scrollcontinuous <0|1>    — auto-cycle text stack in scroll mode
 /defaults                  — reset all params to compiled defaults
 /script/begin              — start staged runtime script upload
-/script/append "line"      — append one `.game` source line
+/script/append "line"      — append one `.anim` source line
 /script/commit             — parse/install staged script text
 /script/cancel             — discard staged script text
 /script/save "file"        — save staged script text to SPIFFS
-/script/load "file"        — load + install a stored `.game` file
-/script/delete "file"      — delete a stored `.game` file from SPIFFS
-/script/files              — list stored `.game` files
+/script/load "file"        — load + install a stored `.anim` file
+/script/delete "file"      — delete a stored `.anim` file from SPIFFS
+/script/files              — list stored `.anim` files
 /script/list               — list loaded runtime scripts
 /script/unload <id>        — unload one runtime script by id
 /script/status             — show storage + staging + runtime counts
 ```
 
-Runtime scripts use the same `.game` text syntax as the build-time demo
+Runtime scripts use the same `.anim` text syntax as the build-time demo
 files. Once a runtime script is committed or loaded, trigger it with the
 existing animation selectors:
 

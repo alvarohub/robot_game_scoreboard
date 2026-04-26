@@ -628,6 +628,7 @@ bool RuntimeScriptManager::loadScriptFile(const char* fileName, String* error) {
     if (path.length() == 0) {
         return setError(error, "invalid script file name");
     }
+    path = _resolveStoredScriptPath(path);
 
     String source;
     if (!_readScriptFile(path, &source, error)) {
@@ -674,6 +675,7 @@ bool RuntimeScriptManager::installBankSlotFromFile(uint8_t slot, const char* fil
     if (path.length() == 0) {
         return setError(error, "invalid script file name");
     }
+    path = _resolveStoredScriptPath(path);
 
     String source;
     if (!_readScriptFile(path, &source, error)) {
@@ -737,6 +739,7 @@ bool RuntimeScriptManager::deleteScriptFile(const char* fileName, String* error)
     if (path.length() == 0) {
         return setError(error, "invalid script file name");
     }
+    path = _resolveStoredScriptPath(path);
     if (!SPIFFS.exists(path)) {
         return setError(error, String("no stored script at ") + path);
     }
@@ -808,7 +811,7 @@ void RuntimeScriptManager::listScriptFiles(Print& out) const {
     File file = root.openNextFile();
     while (file) {
         String name = file.name();
-        if (name.endsWith(".game")) {
+        if (name.endsWith(".anim") || name.endsWith(".game")) {
             out.printf("SCRIPT_FILE %s %u\n", name.c_str(), (unsigned)file.size());
             found = true;
         }
@@ -986,6 +989,41 @@ String RuntimeScriptManager::_bankSlotPath(uint8_t slot) const {
     return String("/bank_slot") + String(slot) + ".anim";
 }
 
+static String _legacyScriptExtensionPath(const String& path) {
+    if (!path.endsWith(".anim")) {
+        return path;
+    }
+    String legacyPath = path;
+    legacyPath.remove(legacyPath.length() - 5);
+    legacyPath += ".game";
+    return legacyPath;
+}
+
+String RuntimeScriptManager::_resolveStoredScriptPath(const String& normalizedPath) {
+    if (normalizedPath.length() == 0 || SPIFFS.exists(normalizedPath)) {
+        return normalizedPath;
+    }
+
+    String legacyExtensionPath = _legacyScriptExtensionPath(normalizedPath);
+    if (legacyExtensionPath != normalizedPath && SPIFFS.exists(legacyExtensionPath)) {
+        return legacyExtensionPath;
+    }
+
+    if (normalizedPath.startsWith("/animations/")) {
+        String legacyDirPath = String("/games/") + normalizedPath.substring(strlen("/animations/"));
+        if (SPIFFS.exists(legacyDirPath)) {
+            return legacyDirPath;
+        }
+
+        String legacyDirExtensionPath = _legacyScriptExtensionPath(legacyDirPath);
+        if (legacyDirExtensionPath != legacyDirPath && SPIFFS.exists(legacyDirExtensionPath)) {
+            return legacyDirExtensionPath;
+        }
+    }
+
+    return normalizedPath;
+}
+
 String RuntimeScriptManager::_normalizePath(const char* fileName) const {
     if (!fileName || fileName[0] == '\0') {
         return String();
@@ -996,11 +1034,11 @@ String RuntimeScriptManager::_normalizePath(const char* fileName) const {
     if (path.length() == 0) {
         return String();
     }
-    if (!path.endsWith(".game")) {
-        path += ".game";
+    if (!path.endsWith(".anim") && !path.endsWith(".game")) {
+        path += ".anim";
     }
     if (!path.startsWith("/")) {
-        path = "/games/" + path;
+        path = "/animations/" + path;
     }
     return path;
 }

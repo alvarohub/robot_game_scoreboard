@@ -9,7 +9,7 @@ Use this file when you need:
 - the full list of implemented commands
 - argument order and examples
 - text and particle parameter ranges
-- `.game` runtime script keywords and limits
+- `.anim` runtime script keywords and limits
 
 ## Transports
 
@@ -191,7 +191,7 @@ Typical live upload sequence:
 The helper uploader already automates this:
 
 ```bash
-python3 test/load_game_serial.py games/demo1.game --display 1 --trigger-text GO
+python3 test/load_game_serial.py animations/demo1.anim --display 1 --trigger-text GO
 ```
 
 ## Text Parameter Reference
@@ -274,7 +274,7 @@ Missing trailing arguments keep the current value.
 
 ### Particle Fields, Defaults And Ranges
 
-| Field              | Positional arg | `.game` field      | Type  | Default  | Firmware range                           | Recommended range        | Notes                                                                  |
+| Field              | Positional arg | `.anim` field      | Type  | Default  | Firmware range                           | Recommended range        | Notes                                                                  |
 | ------------------ | -------------- | ------------------ | ----- | -------- | ---------------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
 | `count`            | 0              | `count`            | int   | `6`      | practical `0..255` from command path     | `4..64` for live control | ParticleSystem hard cap is 256, but the live config field is `uint8_t` |
 | `renderMs`         | 1              | `renderMs`         | int   | `20`     | minimum `1`, practical `1..255`          | `10..40`                 | Cosmetic redraw interval                                               |
@@ -303,7 +303,7 @@ Missing trailing arguments keep the current value.
 | `scaffoldEnabled`  | 24             | `scaffoldEnabled`  | bool  | `false`  | `0/1` or bool token in scripts           | same                     |                                                                        |
 | `collisionEnabled` | 25             | `collisionEnabled` | bool  | `true`   | `0/1` or bool token in scripts           | same                     | Hard-sphere correction and bounce                                      |
 
-### Particle Fields Available Only Through Dedicated Commands Or `.game`
+### Particle Fields Available Only Through Dedicated Commands Or `.anim`
 
 | Field                   | Where                                                                                              | Default | Range            | Notes                                              |
 | ----------------------- | -------------------------------------------------------------------------------------------------- | ------- | ---------------- | -------------------------------------------------- |
@@ -360,7 +360,7 @@ Wiggling text that holds shape:
 /display/1/particles/pause 0
 ```
 
-## Runtime `.game` Script Reference
+## Runtime `.anim` Script Reference
 
 Runtime scripts are parsed on the ESP32 and installed as animation scripts.
 
@@ -443,7 +443,7 @@ particle scaffoldRange 10.0
 particle temperature 0.0
 ```
 
-At the moment, `.game` steps do not carry an arbitrary text payload. `text hello`
+At the moment, `.anim` steps do not carry an arbitrary text payload. `text hello`
 is accepted as compatibility shorthand for `text on`, but the `hello` part is not
 stored in the animation step. Set the display text separately with a normal text
 command, then use the runtime script to animate layer state and particle behavior

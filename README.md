@@ -334,7 +334,11 @@ automatically when changed. The storage uses a versioned format (currently v4).
 robot_game_scoreboard/
 ├── platformio.ini              Build configuration (4 environments)
 ├── README.md                   This file
-├── Journal.md                  Development journal
+├── experiments/
+│   ├── journal/
+│   │   └── Journal.md          Development journal
+│   └── validation/             Ad hoc validation and hardware-check scripts
+├── animations/                 Authored `.anim` demo and preset source files
 ├── src/
 │   ├── main.cpp                Entry point — setup, loop, AP toggle, LCD screens
 │   ├── config.h                All compile-time settings

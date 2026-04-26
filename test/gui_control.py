@@ -1050,7 +1050,7 @@ class ScoreboardGUI:
         return
 
     def _on_script_file_line(self, line):
-        # Expected firmware output: SCRIPT_FILE /games/foo.game 123
+        # Expected firmware output: SCRIPT_FILE /animations/foo.anim 123
         if line.strip() == "SCRIPT_FILE NONE":
             self._script_files = []
             self._set_script_file_choices()
@@ -1237,7 +1237,7 @@ class ScoreboardGUI:
 
     def _load_script_file_from_disk(self):
         path = filedialog.askopenfilename(
-            filetypes=[("Game script files", "*.game"), ("Text files", "*.txt"), ("All files", "*.*")],
+            filetypes=[("Animation script files", "*.anim"), ("Legacy animation files", "*.game"), ("Text files", "*.txt"), ("All files", "*.*")],
             initialdir=os.path.dirname(__file__),
             title="Load animation file from computer",
         )

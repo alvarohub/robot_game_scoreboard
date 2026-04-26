@@ -786,17 +786,17 @@ their compiled defaults.
 ### `/script/begin` — start a staged runtime script upload
 
 No arguments. Clears the staged upload buffer and starts a new
-runtime `.game` script upload session.
+runtime `.anim` script upload session.
 
 ---
 
-### `/script/append` — append one `.game` source line
+### `/script/append` — append one `.anim` source line
 
 | Parameter | Type     | Description            |
 | --------- | -------- | ---------------------- |
 | arg 0     | `string` | One source line to add |
 
-Use this repeatedly to send a `.game` script line by line.
+Use this repeatedly to send a `.anim` script line by line.
 The firmware appends a newline after each call.
 
 **Serial:**
@@ -810,7 +810,7 @@ The firmware appends a newline after each call.
 
 ### `/script/commit` — parse and install staged script
 
-No arguments. Parses the staged `.game` text, installs it as a
+No arguments. Parses the staged `.anim` text, installs it as a
 runtime animation script, and makes it available through the existing
 `/animation N` and `/display/<N>/animation N` commands.
 
@@ -826,10 +826,11 @@ No arguments. Clears the current staged upload buffer.
 
 | Parameter | Type     | Description                   |
 | --------- | -------- | ----------------------------- |
-| arg 0     | `string` | File name or path for `.game` |
+| arg 0     | `string` | File name or path for `.anim` |
 
 Stores the staged script source in SPIFFS. If the name has no leading
-slash, it is stored under `/games/` and `.game` is appended if missing.
+slash, it is stored under `/animations/` and `.anim` is appended if missing.
+Explicit legacy `.game` file names and `/games/` paths are still accepted.
 
 ---
 
@@ -837,9 +838,9 @@ slash, it is stored under `/games/` and `.game` is appended if missing.
 
 | Parameter | Type     | Description                   |
 | --------- | -------- | ----------------------------- |
-| arg 0     | `string` | File name or path for `.game` |
+| arg 0     | `string` | File name or path for `.anim` |
 
-Reads a stored `.game` file from SPIFFS, parses it, and installs it as
+Reads a stored `.anim` file from SPIFFS, parses it, and installs it as
 runtime animation script data.
 
 ---
@@ -899,15 +900,16 @@ default slot.
 
 | Parameter | Type     | Description                   |
 | --------- | -------- | ----------------------------- |
-| arg 0     | `string` | File name or path for `.game` |
+| arg 0     | `string` | File name or path for `.anim` |
 
-Deletes a stored `.game` file from SPIFFS.
+Deletes a stored `.anim` file from SPIFFS.
 
 ---
 
 ### `/script/files` — list stored script files
 
-No arguments. Prints stored `.game` files from SPIFFS to serial.
+No arguments. Prints stored `.anim` files from SPIFFS to serial.
+Legacy `.game` files are listed too.
 
 ---
 

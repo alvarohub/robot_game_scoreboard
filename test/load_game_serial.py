@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-load_game_serial.py — upload one `.game` script to the scoreboard over USB-Serial.
+load_game_serial.py — upload one `.anim` script to the scoreboard over USB-Serial.
 
 Requires:
     pip install pyserial
 
 Usage:
-    python3 load_game_serial.py games/demo1.game
-    python3 load_game_serial.py games/demo1.game --port /dev/ttyACM0
-    python3 load_game_serial.py games/demo1.game --save demo1_runtime
-    python3 load_game_serial.py games/demo1.game --display 1 --trigger-text GO
+    python3 load_game_serial.py animations/demo1.anim
+    python3 load_game_serial.py animations/demo1.anim --port /dev/ttyACM0
+    python3 load_game_serial.py animations/demo1.anim --save demo1_runtime
+    python3 load_game_serial.py animations/demo1.anim --display 1 --trigger-text GO
 
 Notes:
     - This uses the staged runtime-script commands:
@@ -211,8 +211,8 @@ def upload_game(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Upload one .game file over USB-Serial")
-    parser.add_argument("game", type=Path, help="Path to the .game file to upload")
+    parser = argparse.ArgumentParser(description="Upload one .anim file over USB-Serial")
+    parser.add_argument("game", type=Path, help="Path to the .anim file to upload")
     parser.add_argument("--port", help="Serial port, e.g. /dev/ttyACM0 or COM3")
     parser.add_argument("--baud", type=int, default=115200, help="Serial baud rate")
     parser.add_argument(
@@ -248,7 +248,7 @@ def main() -> int:
 
     game_path = args.game.resolve()
     if not game_path.exists():
-        print(f"Game file not found: {game_path}")
+        print(f"Animation file not found: {game_path}")
         return 1
 
     port = args.port or find_serial_port()

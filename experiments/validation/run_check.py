@@ -39,7 +39,7 @@ def main():
 
     send_cmd("/script/begin")
     
-    with open("games/demo1.game", "r") as f:
+    with open("animations/demo1.anim", "r") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):

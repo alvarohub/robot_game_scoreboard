@@ -19,3 +19,6 @@ __pycache__/
 
 # Build-generated animation catalog
 src/generated/GameScripts.generated.h
+
+# Local documentation media
+Documentation_PicsVideos/

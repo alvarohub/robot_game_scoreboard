@@ -6,7 +6,7 @@ from SCons.Script import Import
 Import("env")
 
 PROJECT_DIR = Path(env["PROJECT_DIR"])
-GAMES_DIR = PROJECT_DIR / "games"
+ANIMATIONS_DIR = PROJECT_DIR / "animations"
 OUT_DIR = PROJECT_DIR / "src" / "generated"
 OUT_FILE = OUT_DIR / "GameScripts.generated.h"
 
@@ -327,7 +327,8 @@ def main():
 
     scripts = []
     seen_ids = set()
-    for path in sorted(GAMES_DIR.glob("*.game")):
+    script_paths = sorted(list(ANIMATIONS_DIR.glob("*.anim")) + list(ANIMATIONS_DIR.glob("*.game")))
+    for path in script_paths:
         script = _parse_game_file(path)
         if script["id"] in seen_ids:
             raise RuntimeError(f"duplicate script id {script['id']} in {path.name}")
@@ -335,10 +336,10 @@ def main():
         scripts.append(script)
 
     if not scripts:
-        raise RuntimeError("no .game scripts found in games/")
+        raise RuntimeError("no .anim or .game scripts found in animations/")
 
     OUT_FILE.write_text(_generate_header(scripts) + "\n")
-    print(f"[game-scripts] Compiled {len(scripts)} scripts -> {OUT_FILE.relative_to(PROJECT_DIR)}")
+    print(f"[anim-scripts] Compiled {len(scripts)} scripts -> {OUT_FILE.relative_to(PROJECT_DIR)}")
 
 
 main()

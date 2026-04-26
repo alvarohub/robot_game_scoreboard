@@ -295,7 +295,7 @@ IPAddress OSCHandler::localIP() const {
 //    /script/save "file"       — save staged script text to SPIFFS
 //    /script/load "file"       — load + install script text from SPIFFS
 //    /script/delete "file"     — delete stored script from SPIFFS
-//    /script/files             — list stored .game files in SPIFFS
+//    /script/files             — list stored .anim files in SPIFFS
 //    /script/list              — list currently loaded runtime scripts
 //    /script/unload N          — remove one runtime script by id
 //    /script/status            — show staged upload + storage status
