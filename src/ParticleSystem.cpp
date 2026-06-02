@@ -104,6 +104,7 @@ void ParticleSystem::setConfig(const ParticleSystemConfig& cfg) {
     if (_config.renderMs == 0) _config.renderMs = 1;
     if (_config.substepMs == 0) _config.substepMs = 1;
     if (_config.count > MAX_PARTICLES) _config.count = MAX_PARTICLES;
+    if (_config.mass < 0.05f) _config.mass = 0.05f;  // avoid 1/m blowup
 
     // Update radii on live particles
     for (uint16_t i = 0; i < _count; i++) {
@@ -145,8 +146,8 @@ void ParticleSystem::_substep(float dt) {
     _applyGravity();
     _integrate(dt);
     _constrainWalls();
-    _interParticleInteraction();
-    _scaffoldInteraction();
+    _interParticleInteraction(dt);
+    _scaffoldInteraction(dt);
 }
 
 void ParticleSystem::_applyGravity() {
@@ -155,7 +156,8 @@ void ParticleSystem::_applyGravity() {
             _particles[i].accel = Vec2f{0, 0};
         return;
     }
-    Vec2f g = _gravity * _config.gravityScale;
+    // a = F/m  → lower mass ⇒ stronger response to shake
+    Vec2f g = _gravity * (_config.gravityScale / _config.mass);
     for (uint16_t i = 0; i < _count; i++) {
         _particles[i].accel = g;
     }
@@ -164,18 +166,23 @@ void ParticleSystem::_applyGravity() {
 void ParticleSystem::_integrate(float dt) {
     // Velocity Verlet: pos += v*dt + ½a*dt²; v += a*dt
     float halfDt2 = 0.5f * dt * dt;
+    // dt-aware damping: config value calibrated to a 20 ms substep so
+    // existing presets behave the same; smaller substep ⇒ less per-step decay.
+    float dampingExp = dt * 50.0f;  // 1.0 at dt=0.020s
+    float dampingPerStep = powf(_config.damping, dampingExp);
+    // Langevin jitter: scale as sqrt(dt) for substep-independent variance
+    float tempScale = (_config.temperature > 0.0f)
+        ? _config.temperature * sqrtf(dampingExp) : 0.0f;
 
     for (uint16_t i = 0; i < _count; i++) {
         Particle& p = _particles[i];
         p.pos += p.vel * dt + p.accel * halfDt2;
         p.vel += p.accel * dt;
-        p.vel *= _config.damping;
+        p.vel *= dampingPerStep;
 
-        // Langevin jitter (thermal noise)
-        if (_config.temperature > 0.0f) {
-            float t = _config.temperature;
-            p.vel.x += ((int)random(-1000, 1001)) * 0.001f * t;
-            p.vel.y += ((int)random(-1000, 1001)) * 0.001f * t;
+        if (tempScale > 0.0f) {
+            p.vel.x += ((int)random(-1000, 1001)) * 0.001f * tempScale;
+            p.vel.y += ((int)random(-1000, 1001)) * 0.001f * tempScale;
         }
 
         p.accel = Vec2f{0, 0};
@@ -209,7 +216,7 @@ void ParticleSystem::_constrainWalls() {
     }
 }
 
-void ParticleSystem::_interParticleInteraction() {
+void ParticleSystem::_interParticleInteraction(float dt) {
     // Which forces are active this frame?
     bool doCollide = _config.collisionEnabled;
     bool doAttract = (_config.attractEnabled && _config.attractStrength != 0.0f);
@@ -218,6 +225,13 @@ void ParticleSystem::_interParticleInteraction() {
 
     // Early-out if nothing is active
     if (!doCollide && !doAttract && !doSpring && !doCoulomb) return;
+
+    // Impulse scale: forces below add velocity directly. To make them
+    // substep-independent (so the Substep slider has a real effect on
+    // accuracy/stability) we scale by dt, calibrated to the historical
+    // 20 ms substep so existing presets keep their feel.
+    // Mass divides forces (a = F/m).
+    float impulseScale = (dt * 50.0f) / _config.mass;
 
     // Pre-compute squared cutoffs (collision/attract depend on radii per-pair)
     float springRangeSq  = _config.springRange  * _config.springRange;
@@ -260,15 +274,15 @@ void ParticleSystem::_interParticleInteraction() {
             if (doCollide && dist < minDist) {
                 _applyCollision(a, b, normal, dist, minDist);
             } else if (doAttract && dist < attractDist) {
-                _applyAttraction(a, b, normal, dist, minDist, attractDist);
+                _applyAttraction(a, b, normal, dist, minDist, attractDist, impulseScale);
             }
 
             if (doSpring && dist < _config.springRange) {
-                _applySpringForce(a, b, normal, dist);
+                _applySpringForce(a, b, normal, dist, impulseScale);
             }
 
             if (doCoulomb && dist < _config.coulombRange) {
-                _applyCoulombForce(a, b, normal, dist);
+                _applyCoulombForce(a, b, normal, dist, impulseScale);
             }
         }
     }
@@ -297,36 +311,36 @@ void ParticleSystem::_applyCollision(Particle& a, Particle& b,
 
 void ParticleSystem::_applyAttraction(Particle& a, Particle& b,
                                       Vec2f normal, float dist, float minDist,
-                                      float attractDist) {
+                                      float attractDist, float impulseScale) {
     // Linear pull: strongest at contact (t=0), fades to 0 at attractDist (t=1)
     float t = (dist - minDist) / (attractDist - minDist);
-    float force = _config.attractStrength * (1.0f - t);
+    float force = _config.attractStrength * (1.0f - t) * impulseScale;
     Vec2f pull = normal * force;
     a.vel += pull;
     b.vel -= pull;
 }
 
 void ParticleSystem::_applySpringForce(Particle& a, Particle& b,
-                                       Vec2f normal, float dist) {
+                                       Vec2f normal, float dist, float impulseScale) {
     // Linear spring: F = springStrength × qA × qB × (1 − dist/range)
     // Positive product → repulsion (pushes apart); negative → attraction.
     if (a.charge == 0.0f || b.charge == 0.0f) return;
     float t = dist / _config.springRange;  // 0 at overlap, 1 at range
-    float force = _config.springStrength * a.charge * b.charge * (1.0f - t);
+    float force = _config.springStrength * a.charge * b.charge * (1.0f - t) * impulseScale;
     Vec2f imp = normal * force;
     a.vel -= imp;   // positive force → a pushed away from b
     b.vel += imp;   // symmetric
 }
 
 void ParticleSystem::_applyCoulombForce(Particle& a, Particle& b,
-                                        Vec2f normal, float dist) {
+                                        Vec2f normal, float dist, float impulseScale) {
     // Coulomb: F = coulombStrength × qA × qB / dist²
     // Positive product → repulsion; negative → attraction.
     // Clamped to avoid explosion at very small distances.
     if (a.charge == 0.0f || b.charge == 0.0f) return;
     float distClamped = (dist < 0.5f) ? 0.5f : dist;  // prevent singularity
     float force = _config.coulombStrength * a.charge * b.charge
-                  / (distClamped * distClamped);
+                  / (distClamped * distClamped) * impulseScale;
     Vec2f imp = normal * force;
     a.vel -= imp;
     b.vel += imp;
@@ -338,10 +352,11 @@ void ParticleSystem::_applyCoulombForce(Particle& a, Particle& b,
 //  zero when already at the origin.  Particles without a
 //  scaffold link (originIdx == -1) are unaffected.
 
-void ParticleSystem::_scaffoldInteraction() {
+void ParticleSystem::_scaffoldInteraction(float dt) {
     if (!_config.scaffoldEnabled || !_hasScaffold) return;
 
     float rangeSq = _config.scaffoldRange * _config.scaffoldRange;
+    float impulseScale = (dt * 50.0f) / _config.mass;
 
     for (uint16_t i = 0; i < _count; i++) {
         Particle& p = _particles[i];
@@ -361,7 +376,7 @@ void ParticleSystem::_scaffoldInteraction() {
         // At dist=0 → no pull; at dist=range → full strength.
         Vec2f normal = delta / dist;
         float t = dist / _config.scaffoldRange;
-        float force = _config.scaffoldStrength * t;
+        float force = _config.scaffoldStrength * t * impulseScale;
         p.vel += normal * force;
     }
 }

@@ -332,6 +332,7 @@ void DisplayManager::printDisplayState(uint8_t idx, Print& out) const {
     json += "\"count\":" + String((int)pc.count);
     json += ",\"renderMs\":" + String((int)pc.renderMs);
     json += ",\"substepMs\":" + String((int)pc.substepMs);
+    json += ",\"mass\":" + String(pc.mass, 3);
     json += ",\"gravityScale\":" + String(pc.gravityScale, 3);
     json += ",\"gravityEnabled\":" + String(pc.gravityEnabled ? "true" : "false");
     json += ",\"collisionEnabled\":" + String(pc.collisionEnabled ? "true" : "false");
@@ -470,34 +471,126 @@ void DisplayManager::showRasterScan(uint16_t delayMs) {
     Serial.println("Raster scan complete");
 }
 
+// ── Logical raster scan — uses MATRIX_LAYOUT mapping ─────────
+void DisplayManager::showRasterScanLogical(uint16_t delayMs, int8_t displayIdx) {
+    uint16_t H = _matrix.height();
+    uint16_t xStart = 0;
+    uint16_t xEnd   = _matrix.width();
+    if (displayIdx >= 0 && displayIdx < (int8_t)NUM_DISPLAYS) {
+        xStart = (uint16_t)_offsets[displayIdx];
+        xEnd   = xStart + MATRIX_TILE_WIDTH;
+        Serial.printf("Logical raster scan (display %d): x[%u..%u) y[0..%u), %u ms/step\n",
+                      displayIdx + 1, xStart, xEnd, H, delayMs);
+    } else {
+        Serial.printf("Logical raster scan: %ux%u, %u ms/step\n", xEnd, H, delayMs);
+    }
+
+    uint16_t white = rgb565(255, 255, 255);
+    for (uint16_t y = 0; y < H; y++) {
+        for (uint16_t x = xStart; x < xEnd; x++) {
+            _matrix.fillScreen(0);
+            _matrix.drawPixel(x, y, white);
+            _matrix.show();
+            Serial.printf("(%u,%u)\n", x, y);
+            delay(delayMs);
+        }
+    }
+    _matrix.fillScreen(0);
+    _matrix.show();
+    Serial.println("Logical raster scan complete");
+}
+
 // ── Splash screen ────────────────────────────────────────────
-void DisplayManager::startDisplay(unsigned long durationMs) {
-    uint16_t cyan = rgb565(0, 255, 255);
+// Forces a deterministic boot state: each display shows "DISP N"
+// as static text, with four bouncing balls behind it (no gravity,
+// no damping, perfectly elastic walls, speed-color mode). Any
+// animation that may have been restored from NVS is stopped, so
+// the splash is what the user sees until they explicitly load/run
+// something else.
+void DisplayManager::startSplashScreen() {
+    static const uint16_t splashColors[6] = {
+        rgb565(  0, 255, 255),  // cyan
+        rgb565(255, 128,   0),  // orange
+        rgb565(  0, 255,   0),  // green
+        rgb565(255,   0, 255),  // magenta
+        rgb565(255, 255,   0),  // yellow
+        rgb565(  0, 128, 255),  // sky
+    };
+
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
+        VirtualDisplay* vd = _vDisplays[i];
+        if (!vd) continue;
+
+        _stopAnimation(i);
+
+        uint16_t textColor = splashColors[i % 6];
+
         char label[8];
         snprintf(label, sizeof(label), "DISP%d", i + 1);
-        // Draw label directly (no stack pollution)
-        _vDisplays[i]->fillScreen(0);
-        _vDisplays[i]->setTextColor(cyan);
-        _vDisplays[i]->setCursor(0, 0);
-        _vDisplays[i]->print(label);
-    }
-    update();
-    delay(durationMs / 2);
 
-    // Show READY on each display
-    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
-        _vDisplays[i]->fillScreen(0);
-        _vDisplays[i]->setTextColor(cyan);
-        _vDisplays[i]->setCursor(0, 0);
-        _vDisplays[i]->print("READY");
-    }
-    update();
-    delay(durationMs / 2);
+        vd->setColor(textColor);
+        vd->textClear();
+        vd->textPush(label);
 
-    // Clear everything including text stack
-    for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
-        _vDisplays[i]->textClear();
+        // Mode: text + particles, both layers on
+        DisplayModeConfig mc = vd->modeConfig();
+        mc.mode               = DISPLAY_MODE_TEXT;
+        mc.textEnabled        = true;
+        mc.particlesEnabled   = true;
+        mc.textBrightness     = 255;
+        mc.particleBrightness = 180;
+        mc.particleColor      = 0xFFFF;   // overridden by speedColor
+        mc.text.textIndex     = 0;
+        mc.scroll.continuous  = false;
+
+        // Particles: 4 bouncing balls, no gravity, no damping
+        ParticleModeConfig& p = mc.particles;
+        p.count             = 4;
+        p.radius            = 0.6f;
+        p.gravityEnabled    = false;
+        p.gravityScale      = 0.0f;
+        p.damping           = 1.0f;
+        p.elasticity        = 1.0f;
+        p.wallElasticity    = 1.0f;
+        p.collisionEnabled  = true;
+        p.attractEnabled    = false;
+        p.attractStrength   = 0.0f;
+        p.springEnabled     = false;
+        p.coulombEnabled    = false;
+        p.scaffoldEnabled   = false;
+        p.temperature       = 0.0f;
+        p.physicsPaused     = false;
+        p.renderStyle       = ParticleModeConfig::RENDER_GLOW;
+        p.glowSigma         = 1.5f;
+        p.glowWavelength    = 0.0f;
+        p.speedColor        = true;
+        p.viewTransform     = ParticleTransform2D{};
+
+        vd->setMode(mc);
+
+        // Seed 4 balls with distinct positions and velocities.
+        // initFromPositions zeroes velocities, so we set them after.
+        const float W = (float)vd->width();
+        const float H = (float)vd->height();
+        Vec2f positions[4] = {
+            { W * 0.20f, H * 0.30f },
+            { W * 0.80f, H * 0.30f },
+            { W * 0.20f, H * 0.70f },
+            { W * 0.80f, H * 0.70f },
+        };
+        Vec2f velocities[4] = {
+            {  9.0f,  5.0f },
+            { -7.0f,  6.0f },
+            {  6.0f, -8.0f },
+            { -8.0f, -5.0f },
+        };
+
+        ParticleSystem& sys = vd->particleSystem();
+        sys.initFromPositions(positions, 4, W, H, p.radius, 0xFFFF);
+        for (uint16_t k = 0; k < sys.count(); k++) {
+            sys.particle(k).vel = velocities[k];
+        }
+        sys.setGravity(0.0f, 0.0f);
     }
     update();
 }
@@ -1073,36 +1166,24 @@ void DisplayManager::_tickAnimations() {
 void DisplayManager::_render() {
     _matrix.fillScreen(0);
 
-    uint16_t stripIdx = 0;   // continuous index across ALL displays
-
+    // Blit each VirtualDisplay's row-major canvas onto the matrix
+    // using NeoMatrix's drawPixel(), which honors MATRIX_LAYOUT
+    // (row/column major, tile arrangement, progressive/zigzag).
     for (uint8_t i = 0; i < NUM_DISPLAYS; i++) {
         const uint16_t* buf = _vDisplays[i]->getBuffer();
         if (!buf) continue;
 
         uint16_t dw = _vDisplays[i]->width();
         uint16_t dh = _vDisplays[i]->height();
-        uint16_t totalPixels = dw * dh;
+        uint16_t xOff = (uint16_t)i * dw;   // tiles laid out horizontally
 
-        // Canvas buffer is row-major; matrix layout is ROW-PROGRESSIVE,
-        // so canvas index == raw strip index.  When a dead LED exists
-        // (bypassed with a jumper), we skip its canvas pixel — it
-        // can't be displayed anyway.  Every subsequent pixel lands on
-        // the correct physical LED because the skip keeps strip and
-        // canvas indices in sync.
-        for (uint16_t px = 0; px < totalPixels; px++) {
-#if DEAD_LED_INDEX >= 0
-            uint16_t globalPx = (uint16_t)(i * totalPixels) + px;
-            if (globalPx == (uint16_t)DEAD_LED_INDEX)
-                continue;           // dead LED's pixel — nothing to show
-#endif
-            uint16_t c565 = buf[px];
-            if (c565 != 0) {
-                _matrix.setPixelColor(stripIdx,
-                    (uint8_t)((c565 >> 8) & 0xF8),   // R
-                    (uint8_t)((c565 >> 3) & 0xFC),   // G
-                    (uint8_t)((c565 << 3) & 0xF8));  // B
+        for (uint16_t y = 0; y < dh; y++) {
+            for (uint16_t x = 0; x < dw; x++) {
+                uint16_t c565 = buf[(uint32_t)y * dw + x];
+                if (c565 != 0) {
+                    _matrix.drawPixel(xOff + x, y, c565);
+                }
             }
-            stripIdx++;
         }
     }
 }

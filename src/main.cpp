@@ -219,11 +219,13 @@ void setup() {
     // the internal RAM it needs on the S3.
     displayManager.begin();
     displayManager.showTestPattern();
-    displayManager.startDisplay();
     osc.beginRuntimeScripts();
 
     displayManager.clearAll();
     displayManager.loadStartupParams();
+    // Force splash AFTER loadStartupParams so the boot state is
+    // always "DISP N", not whatever animation/text was last in use.
+    displayManager.startSplashScreen();
     displayManager.update();
     Serial.println(networkUp
         ? "Ready — waiting for OSC messages + serial commands …"

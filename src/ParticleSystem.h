@@ -18,11 +18,12 @@ struct ParticleSystemConfig {
     uint8_t renderMs     = 20;     // canvas redraw interval (cosmetic)
     uint8_t substepMs    = 20;     // max physics sub-step (stability vs CPU)
     float   radius       = 0.45f;  // collision & rendering radius (pixels)
+    float   mass         = 1.0f;   // global particle mass; gravity & forces scale by 1/mass
     float   gravityScale = 18.0f;  // multiplier for IMU g-force input
     float   elasticity   = 0.92f;  // inter-particle bounce (0–1)
     float   wallElasticity = 0.78f;
-    float   damping      = 0.9998f; // per-substep velocity multiplier (1 = none)
-    float   temperature  = 0.0f;   // Langevin jitter magnitude
+    float   damping      = 0.9998f; // velocity multiplier per 20 ms (1 = none, dt-aware)
+    float   temperature  = 0.0f;   // Langevin jitter magnitude (per 20 ms reference)
     float   attractStrength = 0.0f; // inter-particle attraction (0 = off)
     float   attractRange = 3.0f;    // interaction range (× sum-of-radii)
     bool    attractEnabled = true;
@@ -144,8 +145,8 @@ private:
     void _applyGravity();
     void _integrate(float dt);
     void _constrainWalls();
-    void _interParticleInteraction();
-    void _scaffoldInteraction();
+    void _interParticleInteraction(float dt);
+    void _scaffoldInteraction(float dt);
     void _saveScaffold();
 
     // ── Per-force methods (called from interaction loops) ─────
@@ -159,15 +160,15 @@ private:
     /// Short-range attraction: linear pull strongest at contact, zero at attractDist.
     void _applyAttraction(Particle& a, Particle& b,
                           Vec2f normal, float dist, float minDist,
-                          float attractDist);
+                          float attractDist, float impulseScale);
 
     /// Spring force: linear, charge-dependent.
     /// F = springStrength × qA × qB × (1 − dist/range).
     void _applySpringForce(Particle& a, Particle& b,
-                           Vec2f normal, float dist);
+                           Vec2f normal, float dist, float impulseScale);
 
     /// Coulomb force: 1/r², charge-dependent.
     /// F = coulombStrength × qA × qB / dist².
     void _applyCoulombForce(Particle& a, Particle& b,
-                            Vec2f normal, float dist);
+                            Vec2f normal, float dist, float impulseScale);
 };

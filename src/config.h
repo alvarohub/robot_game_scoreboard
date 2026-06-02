@@ -76,6 +76,16 @@
   #define WIFI_AP_PASS "12345678"
 #endif
 
+// Reduced TX power keeps current spikes low (helps WS2812 panel
+// stability when phones scan/refresh nearby). Use only for short
+// range (~few meters). Valid values are members of wifi_power_t
+// in esp_wifi_types.h, e.g. WIFI_POWER_19_5dBm (max),
+// WIFI_POWER_15dBm, WIFI_POWER_11dBm, WIFI_POWER_8_5dBm,
+// WIFI_POWER_7dBm, WIFI_POWER_5dBm, WIFI_POWER_2dBm.
+#ifndef WIFI_TX_POWER
+  #define WIFI_TX_POWER WIFI_POWER_8_5dBm
+#endif
+
 #ifndef WEB_PORT
   #define WEB_PORT 80
 #endif
@@ -111,15 +121,17 @@
 //    NEO_TILE_ROWS / COLUMNS
 //    NEO_TILE_PROGRESSIVE / ZIGZAG
 
-#define MATRIX_LAYOUT ( \
-  NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_PROGRESSIVE + \
-  NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_ROWS      + NEO_TILE_PROGRESSIVE     \
-)
+// This is for the smaller matrix WS2812B-8x32-V1.00 (with little smd resistors) 
+//#define MATRIX_LAYOUT ( \
+//  NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_COLUMNS + NEO_MATRIX_PROGRESSIVE + \
+//  NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_ROWS      + NEO_TILE_PROGRESSIVE     \
+//)
 
-// #define MATRIX_LAYOUT ( \
-//   NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_COLUMNS + NEO_MATRIX_PROGRESSIVE + \
-//   NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_COLUMNS     + NEO_TILE_PROGRESSIVE     \
-// )
+// This is for the larger pitch matrix (without smd resistors), marked: "DotStar Matrix 8x32 - 256 RGB LED Pixels" on the back:
+ #define MATRIX_LAYOUT ( \
+   NEO_MATRIX_TOP  + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_PROGRESSIVE + \
+   NEO_TILE_TOP    + NEO_TILE_LEFT   + NEO_TILE_COLUMNS     + NEO_TILE_PROGRESSIVE     \
+ )
 
 
 #define LED_TYPE (NEO_GRB + NEO_KHZ800)
@@ -131,7 +143,7 @@
 // Every other physical LED shows its correct pixel.
 // Set to -1 to disable (no dead LEDs).
 #ifndef DEAD_LED_INDEX
-  #define DEAD_LED_INDEX 172
+  #define DEAD_LED_INDEX -1 //172
 #endif
 
 // ── Text stack ───────────────────────────────────────────────

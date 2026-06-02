@@ -1,0 +1,32 @@
+# winner.anim
+# Convert the active text to particles, burst briefly, then settle back on the scaffold.
+
+id 4
+name winner
+
+step burst
+mode text
+text off
+particles on
+text_to_particles
+physics running
+particle gravityEnabled false
+particle collisionEnabled false
+particle attractStrength 0.0
+particle attractRange 3.0
+particle springStrength 0.0
+particle springRange 5.0
+particle springEnabled false
+particle coulombStrength 0.0
+particle coulombRange 10.0
+particle coulombEnabled false
+particle scaffoldEnabled true
+particle scaffoldStrength 5.0
+particle scaffoldRange 10.0
+particle temperature 1.0
+wait 1000
+end
+
+step settle
+particle temperature 0.0
+end

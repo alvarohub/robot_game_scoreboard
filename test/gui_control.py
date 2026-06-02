@@ -332,202 +332,212 @@ class ScoreboardGUI:
         ttk.Spinbox(part_f, from_=5, to=50, textvariable=self._psubstep_var, width=4,
                      command=self._send_particle_config).grid(row=1, column=5, sticky="w", **pad)
 
-        # Row 2: gravity scale + gravity enable
+        # Row 2: mass slider (lower mass = stronger reaction to shake / forces, a = F/m)
+        ttk.Label(part_f, text="Mass:").grid(row=2, column=0, **pad)
+        self._pmass_var = tk.DoubleVar(value=1.0)
+        self._pmass_scale = ttk.Scale(part_f, from_=0.1, to=10.0, variable=self._pmass_var,
+                                      orient="horizontal", length=180,
+                                      command=lambda *_: self._send_particle_config())
+        self._pmass_scale.grid(row=2, column=1, columnspan=2, **pad)
+        self._pmass_label = ttk.Label(part_f, text="1.00")
+        self._pmass_label.grid(row=2, column=3, **pad)
+
+        # Row 3: gravity scale + gravity enable
         self._pgrav_enabled = tk.BooleanVar(value=True)
         ttk.Checkbutton(part_f, text="Gravity:", variable=self._pgrav_enabled,
-                        command=self._send_particle_config).grid(row=2, column=0, **pad)
+                        command=self._send_particle_config).grid(row=3, column=0, **pad)
         self._pgrav_var = tk.DoubleVar(value=18.0)
         self._pgrav_scale = ttk.Scale(part_f, from_=0, to=60, variable=self._pgrav_var,
                                       orient="horizontal", length=180,
                                       command=lambda *_: self._send_particle_config())
-        self._pgrav_scale.grid(row=2, column=1, columnspan=2, **pad)
+        self._pgrav_scale.grid(row=3, column=1, columnspan=2, **pad)
         self._pgrav_label = ttk.Label(part_f, text="18.0")
-        self._pgrav_label.grid(row=2, column=3, **pad)
+        self._pgrav_label.grid(row=3, column=3, **pad)
 
-        # Row 2 cont: collision enable checkbox
+        # Row 3 cont: collision enable checkbox
         self._pcollision_enabled = tk.BooleanVar(value=True)
         ttk.Checkbutton(part_f, text="Collision", variable=self._pcollision_enabled,
-                        command=self._send_particle_config).grid(row=2, column=4, **pad)
+                        command=self._send_particle_config).grid(row=3, column=4, **pad)
 
-        # Row 3: restitution (particle-particle) + wall restitution
-        ttk.Label(part_f, text="Restit (p-p):").grid(row=3, column=0, **pad)
+        # Row 4: restitution (particle-particle) + wall restitution
+        ttk.Label(part_f, text="Restit (p-p):").grid(row=4, column=0, **pad)
         self._pelast_var = tk.DoubleVar(value=0.92)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pelast_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=3, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=4, column=1, **pad)
 
-        ttk.Label(part_f, text="Restit (wall):").grid(row=3, column=2, **pad)
+        ttk.Label(part_f, text="Restit (wall):").grid(row=4, column=2, **pad)
         self._pwelast_var = tk.DoubleVar(value=0.78)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pwelast_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=3, column=3, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=4, column=3, **pad)
 
-        # Row 3 cont: damping (per-substep velocity multiplier, 1=none)
-        ttk.Label(part_f, text="Damping:").grid(row=3, column=4, **pad)
+        # Row 4 cont: damping (per 20 ms reference; dt-aware so substep slider matters)
+        ttk.Label(part_f, text="Damping:").grid(row=4, column=4, **pad)
         self._pdamping_var = tk.DoubleVar(value=0.9998)
         ttk.Spinbox(part_f, from_=0.99, to=1.0, increment=0.0001,
                     textvariable=self._pdamping_var, width=7, format="%.4f",
-                    command=self._send_particle_config).grid(row=3, column=5, sticky="w", **pad)
+                    command=self._send_particle_config).grid(row=4, column=5, sticky="w", **pad)
 
-        # Row 4: radius + render style
-        ttk.Label(part_f, text="Radius:").grid(row=4, column=0, **pad)
+        # Row 5: radius + render style
+        ttk.Label(part_f, text="Radius:").grid(row=5, column=0, **pad)
         self._pradius_var = tk.DoubleVar(value=0.45)
         ttk.Scale(part_f, from_=0.1, to=2.0, variable=self._pradius_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=4, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=5, column=1, **pad)
         self._pradius_label = ttk.Label(part_f, text="0.45")
-        self._pradius_label.grid(row=4, column=2, **pad)
+        self._pradius_label.grid(row=5, column=2, **pad)
 
         self._prender_var = tk.IntVar(value=4)  # 0=point,1=square,2=circle,3=text,4=glow
         style_f = ttk.Frame(part_f)
-        style_f.grid(row=4, column=3, columnspan=3, sticky="w", **pad)
+        style_f.grid(row=5, column=3, columnspan=3, sticky="w", **pad)
         for label, val in [("Point", 0), ("Square", 1), ("Circle", 2), ("Text", 3), ("Glow", 4)]:
             ttk.Radiobutton(style_f, text=label, variable=self._prender_var,
                             value=val, command=self._send_particle_config).pack(side="left", padx=2)
 
-        # Row 5: glow sigma + wavelength (interference)
-        ttk.Label(part_f, text="Glow σ:").grid(row=5, column=0, **pad)
+        # Row 6: glow sigma + wavelength (interference)
+        ttk.Label(part_f, text="Glow σ:").grid(row=6, column=0, **pad)
         self._psigma_var = tk.DoubleVar(value=1.2)
         ttk.Scale(part_f, from_=0.2, to=4.0, variable=self._psigma_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_particle_config()).grid(row=5, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=6, column=1, **pad)
         self._psigma_label = ttk.Label(part_f, text="1.2")
-        self._psigma_label.grid(row=5, column=2, **pad)
+        self._psigma_label.grid(row=6, column=2, **pad)
 
-        ttk.Label(part_f, text="λ (wave):").grid(row=5, column=3, **pad)
+        ttk.Label(part_f, text="λ (wave):").grid(row=6, column=3, **pad)
         self._pwavelength_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=8.0, variable=self._pwavelength_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_particle_config()).grid(row=5, column=4, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=6, column=4, **pad)
         self._pwavelength_label = ttk.Label(part_f, text="0.0")
-        self._pwavelength_label.grid(row=5, column=5, **pad)
-        # Row 6: temperature (Langevin jitter)
-        ttk.Label(part_f, text="Temp:").grid(row=6, column=0, **pad)
+        self._pwavelength_label.grid(row=6, column=5, **pad)
+        # Row 7: temperature (Langevin jitter)
+        ttk.Label(part_f, text="Temp:").grid(row=7, column=0, **pad)
         self._ptemp_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=2.0, variable=self._ptemp_var,
                   orient="horizontal", length=180,
-                  command=lambda *_: self._send_particle_config()).grid(row=6, column=1, columnspan=2, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=7, column=1, columnspan=2, **pad)
         self._ptemp_label = ttk.Label(part_f, text="0.0")
-        self._ptemp_label.grid(row=6, column=3, **pad)
+        self._ptemp_label.grid(row=7, column=3, **pad)
 
-        # Row 7: attraction strength + range
-        ttk.Label(part_f, text="Attract:").grid(row=7, column=0, **pad)
+        # Row 8: attraction strength + range
+        ttk.Label(part_f, text="Attract:").grid(row=8, column=0, **pad)
         self._pattract_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0, to=1.0, variable=self._pattract_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=7, column=1, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=8, column=1, **pad)
         self._pattract_label = ttk.Label(part_f, text="0.00")
-        self._pattract_label.grid(row=7, column=2, **pad)
+        self._pattract_label.grid(row=8, column=2, **pad)
 
-        ttk.Label(part_f, text="Range (×d):").grid(row=7, column=3, **pad)
+        ttk.Label(part_f, text="Range (×d):").grid(row=8, column=3, **pad)
         self._pattrange_var = tk.DoubleVar(value=3.0)
         ttk.Scale(part_f, from_=1.5, to=8.0, variable=self._pattrange_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=7, column=4, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=8, column=4, **pad)
 
-        # Row 8: spring force — enable + strength + range
+        # Row 9: spring force — enable + strength + range
         self._pspring_enabled = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Spring",
                         variable=self._pspring_enabled,
                         command=self._send_particle_config).grid(
-            row=8, column=0, sticky="w", **pad
+            row=9, column=0, sticky="w", **pad
         )
-        ttk.Label(part_f, text="Str:").grid(row=8, column=1, sticky="e", **pad)
+        ttk.Label(part_f, text="Str:").grid(row=9, column=1, sticky="e", **pad)
         self._pspring_str_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-5.0, to=5.0, variable=self._pspring_str_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=8, column=2, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=9, column=2, **pad)
         self._pspring_str_label = ttk.Label(part_f, text="0.00")
-        self._pspring_str_label.grid(row=8, column=3, **pad)
-        ttk.Label(part_f, text="Range:").grid(row=8, column=4, sticky="e", **pad)
+        self._pspring_str_label.grid(row=9, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=9, column=4, sticky="e", **pad)
         self._pspring_range_var = tk.DoubleVar(value=5.0)
         ttk.Scale(part_f, from_=0.5, to=20.0, variable=self._pspring_range_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=8, column=5, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=9, column=5, **pad)
 
-        # Row 9: Coulomb force — enable + strength + range
+        # Row 10: Coulomb force — enable + strength + range
         self._pcoulomb_enabled = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Coulomb",
                         variable=self._pcoulomb_enabled,
                         command=self._send_particle_config).grid(
-            row=9, column=0, sticky="w", **pad
+            row=10, column=0, sticky="w", **pad
         )
-        ttk.Label(part_f, text="Str:").grid(row=9, column=1, sticky="e", **pad)
+        ttk.Label(part_f, text="Str:").grid(row=10, column=1, sticky="e", **pad)
         self._pcoulomb_str_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-5.0, to=5.0, variable=self._pcoulomb_str_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=9, column=2, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=10, column=2, **pad)
         self._pcoulomb_str_label = ttk.Label(part_f, text="0.00")
-        self._pcoulomb_str_label.grid(row=9, column=3, **pad)
-        ttk.Label(part_f, text="Range:").grid(row=9, column=4, sticky="e", **pad)
+        self._pcoulomb_str_label.grid(row=10, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=10, column=4, sticky="e", **pad)
         self._pcoulomb_range_var = tk.DoubleVar(value=10.0)
         ttk.Scale(part_f, from_=0.5, to=30.0, variable=self._pcoulomb_range_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=9, column=5, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=10, column=5, **pad)
 
-        # Row 10: Scaffold attraction — enable + strength + range
+        # Row 11: Scaffold attraction — enable + strength + range
         self._pscaffold_enabled = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Scaffold",
                         variable=self._pscaffold_enabled,
                         command=self._send_particle_config).grid(
-            row=10, column=0, sticky="w", **pad
+            row=11, column=0, sticky="w", **pad
         )
-        ttk.Label(part_f, text="Str:").grid(row=10, column=1, sticky="e", **pad)
+        ttk.Label(part_f, text="Str:").grid(row=11, column=1, sticky="e", **pad)
         self._pscaffold_str_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=0.0, to=5.0, variable=self._pscaffold_str_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=10, column=2, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=11, column=2, **pad)
         self._pscaffold_str_label = ttk.Label(part_f, text="0.00")
-        self._pscaffold_str_label.grid(row=10, column=3, **pad)
-        ttk.Label(part_f, text="Range:").grid(row=10, column=4, sticky="e", **pad)
+        self._pscaffold_str_label.grid(row=11, column=3, **pad)
+        ttk.Label(part_f, text="Range:").grid(row=11, column=4, sticky="e", **pad)
         self._pscaffold_range_var = tk.DoubleVar(value=10.0)
         ttk.Scale(part_f, from_=0.5, to=30.0, variable=self._pscaffold_range_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_particle_config()).grid(row=10, column=5, **pad)
+                  command=lambda *_: self._send_particle_config()).grid(row=11, column=5, **pad)
 
-        # Row 11: Text→Particles + Add/Delete particles + Pause Physics
+        # Row 12: Text→Particles + Add/Delete particles + Pause Physics
         ttk.Button(part_f, text="Text → Particles",
-                   command=self._text_to_particles).grid(row=11, column=0, columnspan=2, **pad)
+                   command=self._text_to_particles).grid(row=12, column=0, columnspan=2, **pad)
         ttk.Button(part_f, text="Add Particle",
-               command=self._add_particle).grid(row=11, column=2, **pad)
+               command=self._add_particle).grid(row=12, column=2, **pad)
         ttk.Button(part_f, text="Delete All",
-               command=self._clear_particles).grid(row=11, column=3, **pad)
+               command=self._clear_particles).grid(row=12, column=3, **pad)
         self._physics_paused = tk.BooleanVar(value=False)
         ttk.Checkbutton(part_f, text="Pause Physics", variable=self._physics_paused,
-                command=self._toggle_physics_pause).grid(row=11, column=4, columnspan=2, sticky="w", **pad)
+                command=self._toggle_physics_pause).grid(row=12, column=4, columnspan=2, sticky="w", **pad)
 
-        # Row 12: View transform — rotation + scale
-        ttk.Label(part_f, text="Rotate°:").grid(row=12, column=0, **pad)
+        # Row 13: View transform — rotation + scale
+        ttk.Label(part_f, text="Rotate°:").grid(row=13, column=0, **pad)
         self._protate_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-180.0, to=180.0, variable=self._protate_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_transform()).grid(row=12, column=1, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=13, column=1, **pad)
         self._protate_label = ttk.Label(part_f, text="0.0")
-        self._protate_label.grid(row=12, column=2, **pad)
+        self._protate_label.grid(row=13, column=2, **pad)
 
-        ttk.Label(part_f, text="Scale:").grid(row=12, column=3, **pad)
+        ttk.Label(part_f, text="Scale:").grid(row=13, column=3, **pad)
         self._pscale_var = tk.DoubleVar(value=1.0)
         ttk.Scale(part_f, from_=0.1, to=4.0, variable=self._pscale_var,
                   orient="horizontal", length=120,
-                  command=lambda *_: self._send_transform()).grid(row=12, column=4, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=13, column=4, **pad)
         self._pscale_label = ttk.Label(part_f, text="1.0")
-        self._pscale_label.grid(row=12, column=5, **pad)
+        self._pscale_label.grid(row=13, column=5, **pad)
 
-        # Row 13: View transform — translate X/Y + reset
-        ttk.Label(part_f, text="Tx:").grid(row=13, column=0, **pad)
+        # Row 14: View transform — translate X/Y + reset
+        ttk.Label(part_f, text="Tx:").grid(row=14, column=0, **pad)
         self._ptx_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-16.0, to=16.0, variable=self._ptx_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_transform()).grid(row=13, column=1, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=14, column=1, **pad)
 
-        ttk.Label(part_f, text="Ty:").grid(row=13, column=2, **pad)
+        ttk.Label(part_f, text="Ty:").grid(row=14, column=2, **pad)
         self._pty_var = tk.DoubleVar(value=0.0)
         ttk.Scale(part_f, from_=-8.0, to=8.0, variable=self._pty_var,
                   orient="horizontal", length=100,
-                  command=lambda *_: self._send_transform()).grid(row=13, column=3, **pad)
+                  command=lambda *_: self._send_transform()).grid(row=14, column=3, **pad)
 
         ttk.Button(part_f, text="Reset Transform",
-                   command=self._reset_transform).grid(row=13, column=4, **pad)
+                   command=self._reset_transform).grid(row=14, column=4, **pad)
 
         # ── Actions frame ────────────────────────────────────
         act_f = ttk.LabelFrame(left_col, text="Actions")
@@ -539,11 +549,14 @@ class ScoreboardGUI:
         ttk.Button(act_f, text="Clear All", command=self._clear_all).grid(
             row=0, column=1, **pad
         )
-        ttk.Button(act_f, text="Raster Scan", command=self._raster_scan).grid(
+        ttk.Button(act_f, text="Raw Raster (all, fast)", command=self._raster_scan_raw).grid(
             row=0, column=2, **pad
         )
-        ttk.Button(act_f, text="Defaults", command=self._reset_defaults).grid(
+        ttk.Button(act_f, text="Logical Raster (sel)", command=self._raster_scan_logical).grid(
             row=0, column=3, **pad
+        )
+        ttk.Button(act_f, text="Defaults", command=self._reset_defaults).grid(
+            row=0, column=4, **pad
         )
 
         # ── Animation bank + display assignment ───────────────
@@ -730,6 +743,7 @@ class ScoreboardGUI:
                 "count": 6,
                 "renderMs": 20,
                 "substepMs": 20,
+                "mass": 1.0,
                 "gravityScale": 18.0,
                 "gravityEnabled": True,
                 "collisionEnabled": True,
@@ -778,6 +792,7 @@ class ScoreboardGUI:
                 "count": self._pcount_var.get(),
                 "renderMs": self._prenderms_var.get(),
                 "substepMs": self._psubstep_var.get(),
+                "mass": self._pmass_var.get(),
                 "gravityScale": self._pgrav_var.get(),
                 "gravityEnabled": self._pgrav_enabled.get(),
                 "collisionEnabled": self._pcollision_enabled.get(),
@@ -838,6 +853,7 @@ class ScoreboardGUI:
             self._pcount_var.set(p["count"])
             self._prenderms_var.set(p["renderMs"])
             self._psubstep_var.set(p["substepMs"])
+            self._pmass_var.set(p.get("mass", 1.0))
             self._pgrav_var.set(p["gravityScale"])
             self._pgrav_enabled.set(p["gravityEnabled"])
             self._pcollision_enabled.set(p["collisionEnabled"])
@@ -868,6 +884,7 @@ class ScoreboardGUI:
             self._pty_var.set(p.get("viewTy", 0.0))
             # Update labels
             self._pgrav_label.config(text=f"{p['gravityScale']:.1f}")
+            self._pmass_label.config(text=f"{p.get('mass', 1.0):.2f}")
             self._pradius_label.config(text=f"{p['radius']:.2f}")
             self._psigma_label.config(text=f"{p['glowSigma']:.1f}")
             self._ptemp_label.config(text=f"{p['temperature']:.2f}")
@@ -1137,7 +1154,7 @@ class ScoreboardGUI:
         particles = state.get("particles", {})
         particle_state = merged["particles"]
         for key in (
-            "count", "renderMs", "substepMs", "gravityScale", "gravityEnabled",
+            "count", "renderMs", "substepMs", "mass", "gravityScale", "gravityEnabled",
             "collisionEnabled", "elasticity", "wallElasticity", "damping", "radius",
             "renderStyle", "glowSigma", "glowWavelength", "temperature",
             "attractStrength", "attractRange", "speedColor", "springStrength",
@@ -1367,6 +1384,7 @@ class ScoreboardGUI:
         """Debounced: coalesces rapid slider drags into one send."""
         # Always update labels immediately (cheap, no serial)
         self._pgrav_label.config(text=f"{self._pgrav_var.get():.1f}")
+        self._pmass_label.config(text=f"{self._pmass_var.get():.2f}")
         self._pradius_label.config(text=f"{self._pradius_var.get():.2f}")
         self._psigma_label.config(text=f"{self._psigma_var.get():.1f}")
         self._ptemp_label.config(text=f"{self._ptemp_var.get():.2f}")
@@ -1410,6 +1428,8 @@ class ScoreboardGUI:
         scaffold_range = self._pscaffold_range_var.get()
         scaffold_en = 1 if self._pscaffold_enabled.get() else 0
         collision_en = 1 if self._pcollision_enabled.get() else 0
+        attract_en = 1   # GUI gates attraction via strength; keep enabled flag on
+        mass = self._pmass_var.get()
         self._send(
             f"{self._disp_prefix()}/particles {count} {renderms} {grav:.2f} {elast:.2f} {welast:.2f}"
             f" {radius:.2f} {render} {sigma:.2f} {temp:.2f}"
@@ -1417,7 +1437,7 @@ class ScoreboardGUI:
             f" {speedcol} {spring_str:.2f} {spring_range:.2f} {spring_en}"
             f" {coulomb_str:.2f} {coulomb_range:.2f} {coulomb_en}"
             f" {scaffold_str:.2f} {scaffold_range:.2f} {scaffold_en}"
-            f" {collision_en}"
+            f" {collision_en} {attract_en} {mass:.3f}"
         )
 
     def _clear_display(self):
@@ -1490,8 +1510,16 @@ class ScoreboardGUI:
         self._pscale_label.config(text="1.00")
         self._send(f"{self._disp_prefix()}/particles/resettransform")
 
-    def _raster_scan(self):
-        self._send("/rasterscan 20")
+    def _raster_scan_raw(self):
+        # Raw chain order — ignores MATRIX_LAYOUT, used to discover wiring
+        # and to find dead pixels. Always scans the full strip (no per-display
+        # routing possible without known wiring). Fast (10 ms/step).
+        self._send("/rawrasterscan 10")
+
+    def _raster_scan_logical(self):
+        # Logical (x,y) order using MATRIX_LAYOUT — restricted to the
+        # currently selected display.
+        self._send(f"/rasterscan 20 {self._current_display}")
 
     def _reset_defaults(self):
         self._send("/defaults")
@@ -1666,6 +1694,7 @@ class ScoreboardGUI:
                 if "count" in p: self._pcount_var.set(p["count"])
                 if "renderMs" in p: self._prenderms_var.set(p["renderMs"])
                 if "substepMs" in p: self._psubstep_var.set(p["substepMs"])
+                if "mass" in p: self._pmass_var.set(p["mass"])
                 if "gravityScale" in p: self._pgrav_var.set(p["gravityScale"])
                 if "gravityEnabled" in p: self._pgrav_enabled.set(p["gravityEnabled"])
                 if "collisionEnabled" in p: self._pcollision_enabled.set(p["collisionEnabled"])
@@ -1705,6 +1734,7 @@ class ScoreboardGUI:
 
         # Refresh value labels
         self._pgrav_label.config(text=f"{self._pgrav_var.get():.1f}")
+        self._pmass_label.config(text=f"{self._pmass_var.get():.2f}")
         self._pradius_label.config(text=f"{self._pradius_var.get():.2f}")
         self._psigma_label.config(text=f"{self._psigma_var.get():.1f}")
         self._ptemp_label.config(text=f"{self._ptemp_var.get():.2f}")
@@ -1776,7 +1806,8 @@ class ScoreboardGUI:
                 f" {1 if p.get('coulombEnabled', False) else 0}"
                 f" {p.get('scaffoldStrength', 0.0):.2f} {p.get('scaffoldRange', 10.0):.2f}"
                 f" {1 if p.get('scaffoldEnabled', False) else 0}"
-                f" {1 if p.get('collisionEnabled', True) else 0}"
+                f" {1 if p.get('collisionEnabled', True) else 0} 1"
+                f" {p.get('mass', 1.0):.3f}"
             )
 
     # ── ESP32 NVS banks ────────────────────────────────────────

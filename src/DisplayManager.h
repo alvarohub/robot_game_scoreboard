@@ -92,10 +92,21 @@ public:
 
     /// Lights one LED at a time by raw strip index (0…N-1),
     /// printing the index to Serial. Useful for finding dead LEDs.
+    /// Bypasses NeoMatrix layout mapping (writes raw chain order).
     void showRasterScan(uint16_t delayMs = 30);
 
+    /// Lights one LED at a time in logical (x,y) order using the
+    /// active MATRIX_LAYOUT mapping. Useful to verify row/column
+    /// orientation and tile arrangement are correct.
+    /// If `displayIdx` is in [0, NUM_DISPLAYS), the scan is restricted
+    /// to that single tile; otherwise the full virtual matrix is scanned.
+    void showRasterScanLogical(uint16_t delayMs = 30, int8_t displayIdx = -1);
+
     /// Splash screen shown once at startup.
-    void startDisplay(unsigned long durationMs = 2000);
+    /// Forces a deterministic boot state: each display shows "DISP N"
+    /// with four bouncing balls behind it (no gravity, no damping,
+    /// speed-color mode).  Any restored animation is stopped.
+    void startSplashScreen();
 
     /// Returns true if any display is currently mid-scroll.
     bool isAnimating() const;

@@ -69,10 +69,11 @@ struct ParticleModeConfig {
     uint8_t renderMs     = 20;     // canvas redraw interval (ms)
     uint8_t substepMs    = 20;     // max physics sub-step (ms)
     float   radius       = 0.45f;
+    float   mass         = 1.0f;     // global particle mass (forces ÷ mass)
     float   gravityScale = 18.0f;
     float   elasticity   = 0.92f;    // coef. of restitution, particle-particle
     float   wallElasticity = 0.78f;   // coef. of restitution, wall bounce
-    float   damping        = 0.9998f;  // per-substep velocity multiplier (1 = none)
+    float   damping        = 0.9998f;  // velocity multiplier per 20 ms (1 = none, dt-aware)
     float   temperature    = 0.0f;     // Langevin jitter magnitude
     float   attractStrength = 0.0f;    // inter-particle attraction (0 = off)
     float   attractRange   = 3.0f;     // interaction range (× sum-of-radii)
@@ -121,6 +122,7 @@ struct ParticleModeConfig {
         c.renderMs      = renderMs;
         c.substepMs     = substepMs;
         c.radius        = radius;
+        c.mass          = mass;
         c.gravityScale  = gravityScale;
         c.elasticity    = elasticity;
         c.wallElasticity = wallElasticity;
@@ -245,6 +247,11 @@ public:
     void restoreScaffoldColors();
     /// True if a scaffold snapshot exists.
     bool hasScaffold() const { return _particleSys.hasScaffold(); }
+
+    /// Direct access to the underlying ParticleSystem (advanced/internal use:
+    /// e.g. seeding initial velocities for the splash screen).
+    ParticleSystem&       particleSystem()       { return _particleSys; }
+    const ParticleSystem& particleSystem() const { return _particleSys; }
 
     /// View transform (modelview matrix — render-time only)
     void setParticleTransform(const ParticleTransform2D& t);

@@ -117,6 +117,10 @@ bool OSCHandler::begin() {
     return startAccessPoint();
 #elif SCOREBOARD_WIFI_MODE == SCOREBOARD_WIFI_MODE_STATION
     WiFi.mode(WIFI_STA);
+    // Lower TX power before associating (see config.h WIFI_TX_POWER).
+    if (!WiFi.setTxPower(WIFI_TX_POWER)) {
+        Serial.println("WiFi.setTxPower (STA) failed");
+    }
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("Connecting to WiFi");
 
@@ -244,7 +248,7 @@ IPAddress OSCHandler::localIP() const {
 //                                speedColor springStrength springRange springEnabled
 //                                coulombStrength coulombRange coulombEnabled
 //                                scaffoldStrength scaffoldRange scaffoldEnabled
-//                                collisionEnabled
+//                                collisionEnabled attractEnabled mass
 //    /display/<N>/particles/pause — pause/resume physics: 0=run, 1=pause
 //    /display/<N>/particles/restore — restore scaffold positions (pauses physics)
 //    /display/<N>/particles/restorecolors — restore scaffold colours
@@ -472,6 +476,7 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 if (msg.size() >= 25 && msg.isInt(24))   cfg.scaffoldEnabled  = (msg.getInt(24) != 0);
                 if (msg.size() >= 26 && msg.isInt(25))   cfg.collisionEnabled = (msg.getInt(25) != 0);
                 if (msg.size() >= 27 && msg.isInt(26))   cfg.attractEnabled   = (msg.getInt(26) != 0);
+                if (msg.size() >= 28 && msg.isFloat(27)) cfg.mass             = msg.getFloat(27);
                 _display.setParticleConfig(idx, cfg);
                 Serial.printf("D%d particles: n=%d grav=%.1f(%s) att=%s %.2f@%.1f temp=%.2f spr=%.2f@%.1f(%s) coul=%.2f@%.1f(%s) scf=%.2f@%.1f(%s) col=%s\n",
                               displayNum, cfg.count,
@@ -952,10 +957,24 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
     else if (strcmp(address, "/wifi/state") == 0) {
         printWiFiState(Serial);
     }
-    // ── /rasterscan — light each LED in sequence ─────────────
-    else if (strcmp(address, "/rasterscan") == 0) {
+    // ── /rawrasterscan — raw chain order, ignores layout ─────
+    //    Use this to verify every physical LED is alive.
+    else if (strcmp(address, "/rawrasterscan") == 0) {
         uint16_t ms = (msg.size() >= 1 && msg.isInt(0)) ? msg.getInt(0) : 30;
         _display.showRasterScan(ms);
+    }
+    // ── /rasterscan — logical (x,y) order via MATRIX_LAYOUT ──
+    //    Use this to verify row/column orientation is correct.
+    //    Optional 2nd int arg = display number (1..NUM_DISPLAYS) to
+    //    restrict the scan to a single tile; omit it for full matrix.
+    else if (strcmp(address, "/rasterscan") == 0) {
+        uint16_t ms = (msg.size() >= 1 && msg.isInt(0)) ? msg.getInt(0) : 30;
+        int8_t disp = -1;
+        if (msg.size() >= 2 && msg.isInt(1)) {
+            int d = msg.getInt(1);
+            if (d >= 1 && d <= (int)NUM_DISPLAYS) disp = (int8_t)(d - 1);
+        }
+        _display.showRasterScanLogical(ms, disp);
     }
     // ── /saveparams [/save] — persist to ESP32 NVS ───────────
     else if (strcmp(address, "/saveparams") == 0 || strcmp(address, "/save") == 0) {

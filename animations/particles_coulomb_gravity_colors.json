@@ -1,0 +1,64 @@
+{
+  "display": 1,
+  "animationSlot": 5,
+  "animationName": "winner",
+  "animationRunning": false,
+  "mode": "text",
+  "textEnabled": false,
+  "particlesEnabled": true,
+  "textBrightness": 255,
+  "particleBrightness": 255,
+  "textColor": [
+    255,
+    0,
+    0
+  ],
+  "particleColor": [
+    255,
+    0,
+    0
+  ],
+  "textCount": 1,
+  "textItems": [
+    "hello"
+  ],
+  "scroll": {
+    "stepMs": 50,
+    "continuous": false
+  },
+  "particles": {
+    "count": 11,
+    "renderMs": 6,
+    "substepMs": 1,
+    "gravityScale": 53.38,
+    "gravityEnabled": true,
+    "collisionEnabled": false,
+    "elasticity": 0.8,
+    "wallElasticity": 0.86,
+    "damping": 1.0,
+    "radius": 0.28,
+    "renderStyle": 4,
+    "glowSigma": 0.73,
+    "glowWavelength": 0.0,
+    "temperature": 0.61,
+    "attractStrength": 0.0,
+    "attractRange": 3.0,
+    "attractEnabled": false,
+    "speedColor": true,
+    "springStrength": 0.5,
+    "springRange": 5.0,
+    "springEnabled": false,
+    "coulombStrength": 1.76,
+    "coulombRange": 14.85,
+    "coulombEnabled": true,
+    "scaffoldStrength": 5.0,
+    "scaffoldRange": 19.24,
+    "scaffoldEnabled": true,
+    "physicsPaused": false,
+    "viewRotation": 0.0,
+    "viewScaleX": 1.0,
+    "viewScaleY": 1.0,
+    "viewTx": 0.0,
+    "viewTy": 0.0
+  }
+}

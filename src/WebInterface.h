@@ -223,6 +223,12 @@ select{background:#0f1b22;color:#f2f0ea;border:1px solid #35515f;border-radius:4
     <span class="controlTail">jitter</span>
   </div>
   <div class="controlRow">
+    <label>Mass</label>
+    <input class="stretch" type="range" id="pMass" min="0.1" max="10" step="0.1" value="1" oninput="sliderInput('pMass','pMassV',this.value);sendP()">
+    <span class="val" id="pMassV">1</span>
+    <span class="controlTail">a = F/m</span>
+  </div>
+  <div class="controlRow">
     <label class="toggleLabel"><input type="checkbox" id="pGrvEn" checked onchange="sendP()"><span>Gravity</span></label>
     <input class="stretch" type="range" id="pGrv" min="0" max="50" step="0.5" value="18" oninput="sliderInput('pGrv','pGrvV',this.value);sendP()">
     <span class="val" id="pGrvV">18</span>
@@ -453,6 +459,7 @@ function applyDisplayState(state){
   document.getElementById('pRun').checked=particles.physicsPaused!==true;
   setSlider('pCnt',particles.count,'pCntV');
   setSlider('pStep',particles.substepMs,'pStepV');
+  setSlider('pMass',particles.mass,'pMassV');
   setSlider('pGrv',particles.gravityScale,'pGrvV');
   setSlider('pEl',particles.elasticity,'pElV');
   setSlider('pDamp',particles.damping,'pDampV');
@@ -527,7 +534,7 @@ function sendPNow(){
     +' '+g('pAtt')+' '+g('pAtR')+' '+c('pGrvEn')+' '+g('pStep')+' '+g('pDamp')+' '+g('pWav')
     +' '+c('spCol')+' '+g('pSpr')+' '+g('pSprR')+' '+c('pSprEn')
     +' '+g('pCoul')+' '+g('pCoulR')+' '+c('pCoulEn')
-    +' 0 10 0 '+c('pColEn')+' '+c('pAttEn'),
+    +' 0 10 0 '+c('pColEn')+' '+c('pAttEn')+' '+g('pMass'),
     {refresh:false,refreshDelay:340});
 }
 function sendP(){
