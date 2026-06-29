@@ -56,6 +56,7 @@ private:
       _server.on("/",       [this]() { _handleRoot(); });
       _server.on("/cmd",    [this]() { _handleCmd();  });
       _server.on("/status", [this]() { _handleStatus(); });
+      _server.on("/wifi/off", [this]() { _handleWiFiOff(); });
       _server.onNotFound(   [this]() { _server.send(404, "text/plain", "Not found"); });
       _routesConfigured = true;
     }
@@ -69,6 +70,8 @@ private:
     void _handleCmd();    // defined after OSCHandler is fully visible
 
     void _handleStatus(); // returns JSON status snapshot
+
+  void _handleWiFiOff(); // sends a response, then disables WiFi until reboot
 
     // ── HTML page ────────────────────────────────────────────
     // Built as a single PROGMEM-friendly string.
@@ -96,6 +99,8 @@ input[type=text]{width:100%;padding:6px;background:#0f1b22;color:#f2f0ea;border:
 input[type=color]{width:40px;height:28px;border:none;background:none;cursor:pointer;vertical-align:middle}
 button{background:#1d4e5f;color:#f2f0ea;border:1px solid #4b7c87;border-radius:5px;padding:7px 12px;cursor:pointer;font-size:.8em;margin:2px}
 button:active{background:#2c6c82}
+button.testActive{background:#9b1c1c;border-color:#ff6b6b;color:#fff}
+button.testError{background:#4a0b0b;border-color:#ff2d2d;color:#fff}
 .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .row>*{flex:1;min-width:0}
 .stackInput{flex:3 1 320px}
@@ -115,6 +120,7 @@ select{background:#0f1b22;color:#f2f0ea;border:1px solid #35515f;border-radius:4
 .status{background:#132028;border:1px solid #284451;border-radius:10px;padding:10px 12px;margin-bottom:12px;color:#c7edf0;font-size:.86em}
 .hint{font-size:.76em;color:#87b7bc;margin-top:6px}
 #log{background:#0f1b22;color:#9df19d;font-size:.72em;height:110px;overflow-y:auto;padding:6px;border-radius:6px;margin-top:10px;font-family:monospace;white-space:pre-wrap}
+.testState{font-size:.82em;color:#ffd166;min-width:90px;flex:0 0 auto}
 @media (max-width:720px){
   .controlRow{grid-template-columns:1fr}
   .toggleLabel{min-width:0;flex:1 1 auto}
@@ -137,6 +143,7 @@ select{background:#0f1b22;color:#f2f0ea;border:1px solid #35515f;border-radius:4
   <div class="row">
     <button onclick="dispCmd('/clear')">Clear Display</button>
     <button onclick="refreshStatus()">Refresh Status</button>
+    <button onclick="disableWifi()">Disable WiFi</button>
   </div>
   <div class="row">
     <label>Refresh Speed</label>
@@ -144,6 +151,27 @@ select{background:#0f1b22;color:#f2f0ea;border:1px solid #35515f;border-radius:4
     <span class="val" id="refreshMsV">20</span>
   </div>
   <div class="hint">Use one page to target any of the six scoreboard displays.</div>
+</div>
+
+<div class="card wide">
+  <h2>Display Test</h2>
+  <div class="controlRow">
+    <label>Update Period</label>
+    <input class="stretch" type="range" id="testPeriod" min="100" max="1000" value="250" oninput="sliderInput('testPeriod','testPeriodV',this.value);rescheduleDisplayTest()">
+    <span class="val" id="testPeriodV">250</span>
+    <span class="controlTail">ms, sent by this page</span>
+  </div>
+  <div class="row">
+    <button id="countTestBtn" onclick="startCountdownTest()">Start Count 9999</button>
+    <button id="flashTestBtn" onclick="startFlashTest()">Start Colour Flash</button>
+    <button onclick="stopDisplayTests()">Stop Test</button>
+    <span class="testState" id="testState">stopped</span>
+  </div>
+  <div class="row">
+    <label>Flash A</label><input type="color" id="flashA" value="#ff0000">
+    <label>Flash B</label><input type="color" id="flashB" value="#0000ff">
+  </div>
+  <div class="hint">The browser sends every count or fill value over WiFi. No counter or flash loop runs on the controller.</div>
 </div>
 
 <div class="card">
@@ -317,7 +345,23 @@ let _debounce={};
 let _displayState=null;
 let _refreshTimer=null;
 let _activeSliders={};
+let _testTimer=null;
+let _testMode='';
+let _testValue=9999;
+let _testDir=-1;
+let _testFlashPhase=0;
 function disp(){return document.getElementById('dispSel').value;}
+function setTestButtons(mode,state='active'){
+  ['countTestBtn','flashTestBtn'].forEach(id=>{
+    let el=document.getElementById(id);
+    if(!el) return;
+    el.classList.remove('testActive','testError');
+  });
+  let active=mode==='count'?'countTestBtn':(mode==='flash'?'flashTestBtn':'');
+  if(active){
+    document.getElementById(active).classList.add(state==='error'?'testError':'testActive');
+  }
+}
 function queueRefresh(delay=260){
   clearTimeout(_refreshTimer);
   _refreshTimer=setTimeout(()=>{
@@ -366,6 +410,96 @@ function debouncedDispCmd(key,path,delay=70){
 function sendCol(addr,hex){
   let r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);
   cmd(addr+' '+r+' '+g+' '+b);
+}
+function rgbArgs(hex){
+  return parseInt(hex.substr(1,2),16)+' '+parseInt(hex.substr(3,2),16)+' '+parseInt(hex.substr(5,2),16);
+}
+function testPeriod(){return Math.max(100,Math.min(1000,parseInt(document.getElementById('testPeriod').value,10)||250));}
+function setTestState(text){document.getElementById('testState').textContent=text;}
+function stopDisplayTests(){
+  clearTimeout(_testTimer);
+  _testTimer=null;
+  _testMode='';
+  setTestState('stopped');
+  setTestButtons('');
+}
+function rescheduleDisplayTest(){
+  if(!_testMode || !_testTimer) return;
+  clearTimeout(_testTimer);
+  _testTimer=setTimeout(runDisplayTestFrame,testPeriod());
+}
+function scheduleDisplayTestNext(){
+  clearTimeout(_testTimer);
+  if(_testMode){
+    _testTimer=setTimeout(runDisplayTestFrame,testPeriod());
+  }
+}
+function prepareDisplayTest(textMode){
+  stopDisplayTests();
+  let prefix='/display/'+disp();
+  let cmds=[prefix+'/animation/stop',prefix+'/particles/enable 0'];
+  if(textMode){
+    cmds.push(prefix+'/mode text',prefix+'/text/enable 1');
+  }else{
+    cmds.push(prefix+'/text/enable 0');
+  }
+  return seq(cmds,{refresh:false,refreshDelay:360});
+}
+function startCountdownTest(){
+  prepareDisplayTest(true).then(()=>{
+    _testMode='count';
+    _testValue=9999;
+    _testDir=-1;
+    setTestButtons('count');
+    runDisplayTestFrame();
+  });
+}
+function startFlashTest(){
+  prepareDisplayTest(false).then(()=>{
+    _testMode='flash';
+    _testFlashPhase=0;
+    setTestButtons('flash');
+    runDisplayTestFrame();
+  });
+}
+function runDisplayTestFrame(){
+  let sent=null;
+  if(_testMode==='count'){
+    let text=String(_testValue).padStart(4,'0');
+    sent=requestCommand('/display/'+disp()+'/text "'+text+'"');
+    setTestState(text);
+    _testValue+=_testDir;
+    if(_testValue<=0){_testValue=0;_testDir=1;}
+    else if(_testValue>=9999){_testValue=9999;_testDir=-1;}
+  }else if(_testMode==='flash'){
+    let hex=document.getElementById(_testFlashPhase?'flashB':'flashA').value;
+    sent=requestCommand('/display/'+disp()+'/fill '+rgbArgs(hex));
+    setTestState(hex);
+    _testFlashPhase=1-_testFlashPhase;
+  }
+  if(sent){
+    sent
+      .then(()=>{
+        setTestButtons(_testMode);
+      })
+      .catch(e=>{
+        let failedMode=_testMode;
+        _testMode='';
+        clearTimeout(_testTimer);
+        _testTimer=null;
+        log('ERR: '+e);
+        setTestState('error');
+        setTestButtons(failedMode,'error');
+      })
+      .finally(scheduleDisplayTestNext);
+  }
+}
+function disableWifi(){
+  if(!confirm('Disable WiFi now? Reboot the controller to enable it again.')) return;
+  stopDisplayTests();
+  fetch('/wifi/off')
+    .then(async r=>{let t=await r.text(); log(t); setStatusText(t);})
+    .catch(e=>log('ERR: '+e));
 }
 function setStatusText(text){document.getElementById('netStatus').textContent=text;}
 function rgbToHex(r,g,b){
@@ -501,12 +635,14 @@ function applyTextStack(){
 }
 function assignAnimation(slot){
   if(!slot) return Promise.resolve();
+  stopDisplayTests();
   let shouldRun=document.getElementById('animRun').checked;
   let commands=['/display/'+disp()+'/animation '+slot];
   if(shouldRun){ commands.push('/display/'+disp()+'/animation/start'); }
   return seq(commands);
 }
 function setAnimationRunning(enabled){
+  if(enabled){ stopDisplayTests(); }
   if(enabled){
     if(!_displayState||!_displayState.animationSlot){
       let selected=document.getElementById('animSlot').value;

@@ -99,6 +99,7 @@ private:
     static constexpr size_t SERIAL_BUF_SIZE = 512;
     char    _serialBuf[SERIAL_BUF_SIZE];
     uint8_t _serialPos = 0;
+    bool    _serialQuiet = false;
 #endif
 
 #if SCOREBOARD_RS485_ENABLED

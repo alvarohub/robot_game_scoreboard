@@ -230,6 +230,7 @@ IPAddress OSCHandler::localIP() const {
 //    /display/<N>/particles/brightness — particle layer brightness (int 0-255)
 //    /display/<N>/particles/color — particle colour (3 int args: R G B)
 //    /display/<N>/color        — text colour (3 int args: R G B)
+//    /display/<N>/fill         — fill whole display once (3 int args: R G B)
 //    /display/<N>/clear        — clear one display
 //    /display/<N>/brightness   — per-display brightness (global for now)
 //    /display/<N>/scroll       — scroll mode: 0=instant, 1=up, 2=down
@@ -292,6 +293,7 @@ IPAddress OSCHandler::localIP() const {
 //    /load                     — alias of /loadparams
 //    /animation N              — select animation N for all displays (0=off)
 //    /animation/stop           — stop running animations on all displays
+//    /wifi/off                 — disable WiFi until reboot
 //    /script/begin             — start staged runtime script upload
 //    /script/append "line"     — append one source line to staged script text
 //    /script/commit            — parse/install staged runtime script
@@ -365,12 +367,12 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 char text[32];
                 msg.getString(0, text, sizeof(text));
                 _display.setText(idx, text);
-                Serial.printf("D%d ← \"%s\"\n", displayNum, text);
+                if (!_serialQuiet) Serial.printf("D%d ← \"%s\"\n", displayNum, text);
             } else if (msg.isInt(0)) {
                 char text[16];
                 snprintf(text, sizeof(text), "%ld", (long)msg.getInt(0));
                 _display.setText(idx, text);
-                Serial.printf("D%d ← %s\n", displayNum, text);
+                if (!_serialQuiet) Serial.printf("D%d ← %s\n", displayNum, text);
             }
         }
         else if (strcmp(subCmd, "mode") == 0) {
@@ -387,6 +389,15 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
                 uint8_t b = msg.getInt(2);
                 _display.setColor(idx, r, g, b);
                 Serial.printf("D%d color (%d,%d,%d)\n", displayNum, r, g, b);
+            }
+        }
+        else if (strcmp(subCmd, "fill") == 0) {
+            if (msg.size() >= 3 && msg.isInt(0)) {
+                uint8_t r = msg.getInt(0);
+                uint8_t g = msg.getInt(1);
+                uint8_t b = msg.getInt(2);
+                _display.fill(idx, r, g, b);
+                Serial.printf("D%d fill (%d,%d,%d)\n", displayNum, r, g, b);
             }
         }
         else if (strcmp(subCmd, "clear") == 0) {
@@ -937,6 +948,15 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
         Serial.println("All params reset to defaults");
         _display.schedulePersist();
     }
+    // ── /wifi/off — disable WiFi until reboot ────────────────
+    else if (strcmp(address, "/wifi/off") == 0) {
+#if SCOREBOARD_HAS_WIFI
+        Serial.println("WiFi disabled until reboot");
+        stopWiFi();
+#else
+        Serial.println("WiFi is not enabled in this build");
+#endif
+    }
     // ── /clearqueue — flush all scroll queues ────────────────
     else if (strcmp(address, "/clearqueue") == 0) {
         _display.clearQueueAll();
@@ -956,6 +976,16 @@ void OSCHandler::_processMessage(OSCMessage& msg) {
     }
     else if (strcmp(address, "/wifi/state") == 0) {
         printWiFiState(Serial);
+    }
+    else if (strcmp(address, "/serial/quiet") == 0) {
+#if SERIAL_CMD_ENABLED
+        if (msg.isInt(0)) {
+            _serialQuiet = msg.getInt(0) != 0;
+        }
+        Serial.printf("SERIAL_QUIET %d\n", _serialQuiet ? 1 : 0);
+#else
+        Serial.println("Serial commands are not enabled in this build");
+#endif
     }
     // ── /rawrasterscan — raw chain order, ignores layout ─────
     //    Use this to verify every physical LED is alive.
@@ -1400,22 +1430,24 @@ void OSCHandler::_handleSerialLine(const char* line) {
         }
     }
 
-    Serial.printf("Serial → %s", address);
-    for (int a = 0; a < msg.size(); a++) {
-        if (msg.isString(a)) {
-            char tmp[64];
-            msg.getString(a, tmp, sizeof(tmp));
-            Serial.printf(" \"%s\"", tmp);
-        } else if (msg.isFloat(a)) {
-            Serial.printf(" %.3f", msg.getFloat(a));
-        } else if (msg.isInt(a)) {
-            Serial.printf(" %ld", (long)msg.getInt(a));
+    if (!_serialQuiet || strcmp(address, "/serial/quiet") == 0) {
+        Serial.printf("Serial → %s", address);
+        for (int a = 0; a < msg.size(); a++) {
+            if (msg.isString(a)) {
+                char tmp[64];
+                msg.getString(a, tmp, sizeof(tmp));
+                Serial.printf(" \"%s\"", tmp);
+            } else if (msg.isFloat(a)) {
+                Serial.printf(" %.3f", msg.getFloat(a));
+            } else if (msg.isInt(a)) {
+                Serial.printf(" %ld", (long)msg.getInt(a));
+            }
         }
+        Serial.println();
     }
-    Serial.println();
 
 #if SCOREBOARD_HAS_M5UNIFIED
-    _lcdSerialDebug(line);
+    if (!_serialQuiet) _lcdSerialDebug(line);
 #endif
 
     _processMessage(msg);

@@ -31,6 +31,7 @@ public:
     void setText(uint8_t displayIndex, const char* text);
     void setColor(uint8_t displayIndex, uint8_t r, uint8_t g, uint8_t b);
     void setColor(uint8_t displayIndex, uint16_t color565);
+    void fill(uint8_t displayIndex, uint8_t r, uint8_t g, uint8_t b);
     void clear(uint8_t displayIndex);
 
     // ── Display modes ───────────────────────────────────────────────

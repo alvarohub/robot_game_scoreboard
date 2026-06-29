@@ -22,6 +22,42 @@ Displays are numbered **1 – 6** (1-based) in all commands.
 
 ---
 
+### `/wifi/off` — disable WiFi until reboot
+
+No arguments. Stops the WiFi interface and OSC UDP listener. This is useful
+when testing whether display problems are related to WiFi traffic or RF noise.
+Reboot the controller to bring WiFi back.
+
+**Serial:**
+
+```
+/wifi/off
+```
+
+The WiFi GUI also has a **Disable WiFi** button. It uses a dedicated HTTP
+route so the browser can receive a final response before the access point
+shuts down.
+
+---
+
+### `/serial/quiet` — reduce serial debug output
+
+| Parameter | Type  | Description                |
+| --------- | ----- | -------------------------- |
+| arg 0     | `int` | `1` = quiet, `0` = verbose |
+
+Suppresses high-rate serial command echo/debug lines. This is useful for
+scripted tests that send many `/display/<N>/text` updates per second.
+
+**Serial:**
+
+```
+/serial/quiet 1
+/serial/quiet 0
+```
+
+---
+
 ### `/display/<N>` — set display text (short form)
 
 | Parameter | Type            | Description                   |
@@ -31,6 +67,10 @@ Displays are numbered **1 – 6** (1-based) in all commands.
 Sets the text shown on display _N_. An integer argument is
 converted to its decimal string. Text is auto-centred in the
 32-pixel-wide tile. Maximum ~5 characters at the default font.
+
+This command always updates the visible text immediately. The value is
+also recorded in the display's bounded circular text history, used by
+scroll modes, but that history does not block later text updates.
 
 **OSC (Python):**
 
@@ -64,6 +104,9 @@ oscsend 192.168.1.42 9000 /display/2 i 42
 | arg 0     | `string` | The text to show |
 
 Identical to `/display/<N>` with a string argument.
+
+The text is shown immediately and also recorded in the display's circular
+text history for scroll modes.
 
 **OSC (Python):**
 
@@ -135,6 +178,27 @@ oscsend 192.168.1.42 9000 /display/1/color iii 255 0 0
 /display/1/color 255 0 0
 /display/2/color 0 255 0
 /display/3/color 0 100 255
+```
+
+---
+
+### `/display/<N>/fill` — fill a whole display once
+
+| Parameter | Type  | Description     |
+| --------- | ----- | --------------- |
+| arg 0     | `int` | Red (0 – 255)   |
+| arg 1     | `int` | Green (0 – 255) |
+| arg 2     | `int` | Blue (0 – 255)  |
+
+Immediately paints every LED in display _N_ with the requested colour.
+This is a one-shot command, not a firmware animation loop, and is useful
+for browser-driven display/communications tests.
+
+**Serial:**
+
+```
+/display/1/fill 255 0 0
+/display/1/fill 0 0 255
 ```
 
 ---

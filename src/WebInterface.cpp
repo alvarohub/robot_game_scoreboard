@@ -98,3 +98,14 @@ void WebInterface::_handleStatus() {
     json += '}';
     _server.send(200, "application/json", json);
 }
+
+void WebInterface::_handleWiFiOff() {
+#if SCOREBOARD_HAS_WIFI
+    _server.send(200, "text/plain", "WiFi disabled. Reboot the controller to enable it again.");
+    delay(150);
+    _osc.stopWiFi();
+    _running = false;
+#else
+    _server.send(400, "text/plain", "WiFi is not enabled in this build.");
+#endif
+}

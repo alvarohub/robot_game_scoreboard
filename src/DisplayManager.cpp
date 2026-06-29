@@ -85,8 +85,8 @@ void DisplayManager::begin() {
 // ── Per-display forwarding ───────────────────────────────────
 void DisplayManager::setText(uint8_t idx, const char* text) {
     if (idx >= NUM_DISPLAYS) return;
+    _stopAnimation(idx);
     _vDisplays[idx]->setText(text);
-    _onTextSet(idx);
 }
 
 void DisplayManager::setColor(uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
@@ -97,6 +97,13 @@ void DisplayManager::setColor(uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
 void DisplayManager::setColor(uint8_t idx, uint16_t color565) {
     if (idx >= NUM_DISPLAYS) return;
     _vDisplays[idx]->setColor(color565);
+}
+
+void DisplayManager::fill(uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
+    if (idx >= NUM_DISPLAYS) return;
+    _stopAnimation(idx);
+    _vDisplays[idx]->fillSolid(rgb565(r, g, b));
+    _needsUpdate = true;
 }
 
 void DisplayManager::clear(uint8_t idx) {

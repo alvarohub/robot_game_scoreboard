@@ -178,6 +178,7 @@ public:
     void setColor(uint8_t r, uint8_t g, uint8_t b);
     void setColor(uint16_t color565);
     uint16_t color() const { return _color; }
+    void fillSolid(uint16_t color565);
     void clear();
 
     // ── Text stack ──────────────────────────────────────────────
@@ -288,6 +289,7 @@ private:
     // Text stack (per-display, shared across modes)
     char     _textStack[TEXT_STACK_MAX][TEXT_MAX_LEN];
     uint8_t  _textStackCount;
+    uint8_t  _textStackNext;
 
     // Active text for scroll animation (resolved from stack or pushed directly)
     char     _text[TEXT_MAX_LEN];

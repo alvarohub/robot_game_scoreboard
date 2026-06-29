@@ -55,6 +55,7 @@ static String trimAscii(const String& value) {
 VirtualDisplay::VirtualDisplay(uint16_t w, uint16_t h)
     : GFXcanvas16(w, h),
       _textStackCount(0),
+            _textStackNext(0),
       _color(0xFFFF),          // white in RGB565
       _dirty(true),
       _modeConfig(),
@@ -79,11 +80,13 @@ VirtualDisplay::VirtualDisplay(uint16_t w, uint16_t h)
 void VirtualDisplay::setText(const char* text) {
     if (!text) text = "";
 
-    // In static text mode, skip if text is identical (no visible change)
-    if (strcmp(_text, text) == 0 && !_isScrollMode()) return;
+    _modeConfig.textEnabled = true;
 
     // Always push to the text stack
     textPush(text);
+
+    // In static text mode, skip the redraw if text is identical.
+    if (strcmp(_text, text) == 0 && !_isScrollMode()) return;
 
     if (_isScrollMode()) {
         if (_scrollOffset > 0) {
@@ -112,6 +115,20 @@ void VirtualDisplay::setColor(uint8_t r, uint8_t g, uint8_t b) {
 void VirtualDisplay::setColor(uint16_t color565) {
     _color = color565;
     _dirty = true;
+}
+
+void VirtualDisplay::fillSolid(uint16_t color565) {
+    _text[0] = '\0';
+    _oldText[0] = '\0';
+    _scrollOffset = 0;
+    _scrollJustDone = false;
+    _continuousIdx = 0;
+    _resetQueue();
+    _modeConfig.mode = DISPLAY_MODE_TEXT;
+    _modeConfig.textEnabled = false;
+    _modeConfig.particlesEnabled = false;
+    fillScreen(color565);
+    _dirty = false;
 }
 
 void VirtualDisplay::setParticleColor(uint8_t r, uint8_t g, uint8_t b) {
@@ -174,37 +191,51 @@ void VirtualDisplay::clear() {
 
 // ── Text stack ───────────────────────────────────────────────
 int8_t VirtualDisplay::textPush(const char* text) {
-    if (_textStackCount >= TEXT_STACK_MAX) return -1;
-    strncpy(_textStack[_textStackCount], text ? text : "", TEXT_MAX_LEN - 1);
-    _textStack[_textStackCount][TEXT_MAX_LEN - 1] = '\0';
+    uint8_t slot = _textStackNext;
+    strncpy(_textStack[slot], text ? text : "", TEXT_MAX_LEN - 1);
+    _textStack[slot][TEXT_MAX_LEN - 1] = '\0';
+    _textStackNext = (uint8_t)((_textStackNext + 1) % TEXT_STACK_MAX);
+    if (_textStackCount < TEXT_STACK_MAX) {
+        _textStackCount++;
+    }
     _dirty = true;
-    return _textStackCount++;
+    return slot;
 }
 
 bool VirtualDisplay::textPop() {
     if (_textStackCount == 0) return false;
+    _textStackNext = (_textStackNext + TEXT_STACK_MAX - 1) % TEXT_STACK_MAX;
+    _textStack[_textStackNext][0] = '\0';
     _textStackCount--;
-    _textStack[_textStackCount][0] = '\0';
     _dirty = true;
     return true;
 }
 
 bool VirtualDisplay::textSet(uint8_t index, const char* text) {
     if (index >= TEXT_STACK_MAX) return false;
-    strncpy(_textStack[index], text ? text : "", TEXT_MAX_LEN - 1);
-    _textStack[index][TEXT_MAX_LEN - 1] = '\0';
-    if (index >= _textStackCount) _textStackCount = index + 1;
+    uint8_t start = (_textStackCount < TEXT_STACK_MAX) ? 0 : _textStackNext;
+    uint8_t slot = (_textStackCount < TEXT_STACK_MAX && index >= _textStackCount)
+        ? index
+        : (uint8_t)((start + index) % TEXT_STACK_MAX);
+    strncpy(_textStack[slot], text ? text : "", TEXT_MAX_LEN - 1);
+    _textStack[slot][TEXT_MAX_LEN - 1] = '\0';
+    if (index >= _textStackCount) {
+        _textStackCount = index + 1;
+        _textStackNext = _textStackCount % TEXT_STACK_MAX;
+    }
     _dirty = true;
     return true;
 }
 
 const char* VirtualDisplay::textGet(uint8_t index) const {
     if (index >= _textStackCount) return "";
-    return _textStack[index];
+    uint8_t start = (_textStackCount < TEXT_STACK_MAX) ? 0 : _textStackNext;
+    return _textStack[(start + index) % TEXT_STACK_MAX];
 }
 
 void VirtualDisplay::textClear() {
     _textStackCount = 0;
+    _textStackNext = 0;
     memset(_textStack, 0, sizeof(_textStack));
     _text[0] = '\0';
     _oldText[0] = '\0';
@@ -252,9 +283,9 @@ bool VirtualDisplay::replaceTextStack(const char* textList) {
 
     if (_isScrollMode()) {
         _continuousIdx = 0;
-        _startScroll(_textStack[0]);
+        _startScroll(textGet(0));
         for (uint8_t index = 1; index < _textStackCount && _queueCount < SCROLL_QUEUE_SIZE; index++) {
-            strncpy(_queue[_queueTail], _textStack[index], TEXT_MAX_LEN - 1);
+            strncpy(_queue[_queueTail], textGet(index), TEXT_MAX_LEN - 1);
             _queue[_queueTail][TEXT_MAX_LEN - 1] = '\0';
             _queueTail = (_queueTail + 1) % SCROLL_QUEUE_SIZE;
             _queueCount++;
@@ -274,8 +305,6 @@ const char* VirtualDisplay::_activeText() const {
     uint8_t idx = 0;
     switch (_modeConfig.mode) {
         case DISPLAY_MODE_TEXT:
-            // Immediate mode: show the last (most recent) stack entry
-            if (_textStackCount > 0) return _textStack[_textStackCount - 1];
             return _text;
         default:
             // Scroll modes use _text directly (managed by scroll animation)
@@ -329,7 +358,7 @@ void VirtualDisplay::setMode(const DisplayModeConfig& config) {
         // For continuous scroll: kick off first scroll immediately
         if (_isScrollMode() && _modeConfig.scroll.continuous && _textStackCount > 0) {
             _continuousIdx = 0;
-            _startScroll(_textStack[0]);
+            _startScroll(textGet(0));
         }
         _dirty = true;
     }
@@ -358,7 +387,7 @@ void VirtualDisplay::setScrollContinuous(bool enabled) {
     _modeConfig.scroll.continuous = enabled;
     if (enabled && _isScrollMode() && _textStackCount > 0 && _scrollOffset == 0) {
         _continuousIdx = 0;
-        _startScroll(_textStack[0]);
+        _startScroll(textGet(0));
     }
 }
 
@@ -818,7 +847,7 @@ void VirtualDisplay::_startScroll(const char* newText) {
 
 void VirtualDisplay::_startContinuousNext() {
     _continuousIdx = (_continuousIdx + 1) % _textStackCount;
-    const char* next = _textStack[_continuousIdx];
+    const char* next = textGet(_continuousIdx);
     _startScroll(next);
 }
 
